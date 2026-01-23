@@ -11,10 +11,11 @@ import Progress from './pages/Progress'
 import Achievements from './pages/Achievements'
 import Login from './pages/Login'
 import ViewPath from './skillPath/Viewpath'
-import ResumeLesson from './skillPath/Resumelesson'
 import ViewClass from './classes/Viewclass'
 import SignUp from './pages/Signup'
 import Admin from './Admin'
+import ViewLesson from './classes/Viewlesson'
+import TakeQuiz from './classes/Takequiz'
 
 function App() {
   const [count, setCount] = useState(0)
@@ -37,10 +38,11 @@ function App() {
         <Route path="/achievements" element={<Achievements />} />
         <Route path="/login" element={<Login />} />
         <Route path="/viewpath" element={<ViewPath />} />
-        <Route path="/resume" element={<ResumeLesson />} />
         <Route path="/viewclass" element={<ViewClass />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/viewlesson" element={<ViewLesson />} />
+        <Route path="/takequiz" element={<TakeQuiz />} />
        </Routes>
       </main>
 

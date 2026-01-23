@@ -8,6 +8,7 @@ import {
   getDocs,
   addDoc,
   updateDoc,
+  setDoc,
   deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
@@ -21,24 +22,26 @@ function ViewPath() {
   const [path, setPath] = useState(null);
   const [lessons, setLessons] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
-  const [progress, setProgress] = useState(0);
+  const [completedLessons, setCompletedLessons] = useState([]); // Tracked as an array of IDs
   const [loading, setLoading] = useState(true);
 
-  // Forms
+  // --- ADMIN FORM STATES ---
   const [lessonForm, setLessonForm] = useState({ title: "", description: "" });
-  const [quizForm, setQuizForm] = useState([{ question: "", choices: [{ text: "", isCorrect: false }] }]);
   const [selectedLessonForQuiz, setSelectedLessonForQuiz] = useState("");
+  const [quizForm, setQuizForm] = useState([
+    { question: "", choices: [{ text: "", isCorrect: true }, { text: "", isCorrect: false }] }
+  ]);
 
-  // Edit Modals State
+  // --- MODAL STATES ---
   const [editLessonTarget, setEditLessonTarget] = useState(null);
   const [editQuizTarget, setEditQuizTarget] = useState(null);
-
-  const [studentAnswers, setStudentAnswers] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  // --- STUDENT STATE ---
+  const [studentAnswers, setStudentAnswers] = useState({});
 
   const getCollectionName = (type) => (type === "quiz" ? "quizzes" : "lessons");
 
-  // ------------------ Fetch User ------------------
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       if (!currentUser) {
@@ -54,7 +57,6 @@ function ViewPath() {
     return () => unsubscribe();
   }, [navigate]);
 
-  // ------------------ Fetch Data ------------------
   const fetchData = async () => {
     if (!pathId) return navigate("/learningpaths");
     try {
@@ -69,58 +71,77 @@ function ViewPath() {
       setQuizzes(quizzesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       if (user?.uid) {
-        const userPathDoc = await getDoc(doc(db, "users", user.uid, "userPaths", pathId));
+        const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
+        const userPathDoc = await getDoc(userPathRef);
         if (userPathDoc.exists()) {
           const completed = userPathDoc.data().completedLessons || [];
-          setProgress(completed.length);
+          setCompletedLessons(completed);
           setStudentAnswers(userPathDoc.data().completedQuizzes || {});
+        } else {
+          setCompletedLessons([]);
+          setStudentAnswers({});
         }
       }
     } catch (err) {
-      console.error("Error fetching data:", err);
+      console.error("Fetch Error:", err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (user) fetchData();
+    if (user && pathId) fetchData();
   }, [pathId, user]);
 
-  // ------------------ Admin Functions ------------------
+  // --- ADMIN: QUIZ FORM LOGIC ---
+  const addQuestion = () => {
+    setQuizForm([...quizForm, { question: "", choices: [{ text: "", isCorrect: true }, { text: "", isCorrect: false }] }]);
+  };
+
+  const removeQuestion = (qIndex) => {
+    setQuizForm(quizForm.filter((_, i) => i !== qIndex));
+  };
+
+  const addChoice = (qIndex) => {
+    const newForm = [...quizForm];
+    newForm[qIndex].choices.push({ text: "", isCorrect: false });
+    setQuizForm(newForm);
+  };
+
+  const removeChoice = (qIndex, cIndex) => {
+    const newForm = [...quizForm];
+    newForm[qIndex].choices = newForm[qIndex].choices.filter((_, i) => i !== cIndex);
+    setQuizForm(newForm);
+  };
+
+  const handleQuizFieldChange = (qIndex, field, value) => {
+    const newForm = [...quizForm];
+    newForm[qIndex][field] = value;
+    setQuizForm(newForm);
+  };
+
+  const handleChoiceFieldChange = (qIndex, cIndex, value) => {
+    const newForm = [...quizForm];
+    newForm[qIndex].choices[cIndex].text = value;
+    setQuizForm(newForm);
+  };
+
+  const handleSetCorrect = (qIndex, cIndex) => {
+    const newForm = [...quizForm];
+    newForm[qIndex].choices.forEach((c, i) => (c.isCorrect = i === cIndex));
+    setQuizForm(newForm);
+  };
+
+  // --- ACTIONS ---
   const handleAddLesson = async (e) => {
     e.preventDefault();
-    await addDoc(collection(db, "content", pathId, "lessons"), { 
-      ...lessonForm, 
-      createdBy: user.uid, 
-      createdAt: serverTimestamp() 
-    });
+    await addDoc(collection(db, "content", pathId, "lessons"), { ...lessonForm, createdBy: user.uid, createdAt: serverTimestamp() });
     setLessonForm({ title: "", description: "" });
     fetchData();
   };
 
-  const handleUpdateLesson = async () => {
-    if (!editLessonTarget) return;
-    await updateDoc(doc(db, "content", pathId, "lessons", editLessonTarget.id), {
-      title: editLessonTarget.title,
-      description: editLessonTarget.description
-    });
-    setEditLessonTarget(null);
-    fetchData();
-  };
-
-  const handleUpdateQuiz = async () => {
-    if (!editQuizTarget) return;
-    await updateDoc(doc(db, "content", pathId, "quizzes", editQuizTarget.id), {
-      title: editQuizTarget.title,
-      questions: editQuizTarget.questions
-    });
-    setEditQuizTarget(null);
-    fetchData();
-  };
-
   const handleAddQuiz = async () => {
-    if (!selectedLessonForQuiz) return alert("Select a lesson");
+    if (!selectedLessonForQuiz) return alert("Select a lesson first!");
     await addDoc(collection(db, "content", pathId, "quizzes"), {
       lessonId: selectedLessonForQuiz,
       title: `Quiz for ${lessons.find(l => l.id === selectedLessonForQuiz)?.title}`,
@@ -128,193 +149,242 @@ function ViewPath() {
       createdBy: user.uid,
       createdAt: serverTimestamp(),
     });
-    setQuizForm([{ question: "", choices: [{ text: "", isCorrect: false }] }]);
+    setQuizForm([{ question: "", choices: [{ text: "", isCorrect: true }, { text: "", isCorrect: false }] }]);
     fetchData();
   };
 
+  const handleUpdateLesson = async () => {
+    await updateDoc(doc(db, "content", pathId, "lessons", editLessonTarget.id), { title: editLessonTarget.title, description: editLessonTarget.description });
+    setEditLessonTarget(null);
+    fetchData();
+  };
+
+  const handleUpdateQuiz = async () => {
+    try {
+        await updateDoc(doc(db, "content", pathId, "quizzes", editQuizTarget.id), { 
+            title: editQuizTarget.title, 
+            questions: editQuizTarget.questions 
+        });
+        setEditQuizTarget(null);
+        fetchData();
+    } catch (error) {
+        console.error("Update Quiz Error:", error);
+    }
+  };
+
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const collectionName = getCollectionName(deleteTarget.type);
-    await deleteDoc(doc(db, "content", pathId, collectionName, deleteTarget.id));
+    await deleteDoc(doc(db, "content", pathId, getCollectionName(deleteTarget.type), deleteTarget.id));
     setDeleteTarget(null);
     fetchData();
   };
 
-  // ------------------ Student Functions ------------------
+  // --- STUDENT PROGRESS LOGIC (FIXED) ---
   const handleCompleteLesson = async (lessonId) => {
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
-    const userPathDoc = await getDoc(userPathRef);
-    const completedLessons = userPathDoc.exists() ? userPathDoc.data().completedLessons || [] : [];
     if (!completedLessons.includes(lessonId)) {
       const updated = [...completedLessons, lessonId];
-      await updateDoc(userPathRef, { completedLessons: updated, updatedAt: serverTimestamp() });
-      setProgress(updated.length);
+      await setDoc(userPathRef, { completedLessons: updated, updatedAt: serverTimestamp() }, { merge: true });
+      setCompletedLessons(updated);
     }
   };
 
-  const handleAnswer = async (quizId, questionIndex, choiceIndex) => {
+  const handleResetLesson = async (lessonId) => {
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
-    const userPathDoc = await getDoc(userPathRef);
-    const completedQuizzes = userPathDoc.exists() ? userPathDoc.data().completedQuizzes || {} : {};
-    const newQuizProgress = { ...completedQuizzes, [quizId]: { ...completedQuizzes[quizId], [questionIndex]: choiceIndex } };
-    
-    await updateDoc(userPathRef, { completedQuizzes: newQuizProgress, updatedAt: serverTimestamp() });
-    setStudentAnswers(newQuizProgress);
+    const updated = completedLessons.filter(id => id !== lessonId);
+    await setDoc(userPathRef, { completedLessons: updated, updatedAt: serverTimestamp() }, { merge: true });
+    setCompletedLessons(updated);
+  };
+
+  const isQuizPerfect = (quiz) => {
+    const answers = studentAnswers[quiz.id];
+    if (!answers || Object.keys(answers).length < quiz.questions.length) return false;
+    return quiz.questions.every((q, i) => q.choices[answers[i]]?.isCorrect === true);
+  };
+
+  const handleAnswer = async (quizId, qIdx, cIdx, quiz) => {
+    if (isQuizPerfect(quiz)) return;
+    const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
+    const newAnswers = { ...studentAnswers, [quizId]: { ...studentAnswers[quizId], [qIdx]: cIdx } };
+    await setDoc(userPathRef, { completedQuizzes: newAnswers }, { merge: true });
+    setStudentAnswers(newAnswers);
   };
 
   const handleRedoQuiz = async (quizId) => {
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
     const newAnswers = { ...studentAnswers };
     delete newAnswers[quizId];
-
-    await updateDoc(userPathRef, { completedQuizzes: newAnswers, updatedAt: serverTimestamp() });
+    await updateDoc(userPathRef, { completedQuizzes: newAnswers });
     setStudentAnswers(newAnswers);
   };
 
-  const isQuizPerfect = (quiz) => {
-    const answers = studentAnswers[quiz.id];
-    if (!answers || Object.keys(answers).length < quiz.questions.length) return false;
+  if (loading || !path) return <div className="text-center py-5"><div className="spinner-border text-primary"></div></div>;
 
-    return quiz.questions.every((q, i) => {
-      const selectedIdx = answers[i];
-      return q.choices[selectedIdx]?.isCorrect === true;
-    });
-  };
-
-  if (loading || !path) return <div className="text-center py-5">Loading...</div>;
-
-  const progressPercent = lessons.length ? Math.round((progress / lessons.length) * 100) : 0;
+  const progressPercent = lessons.length ? Math.round((completedLessons.length / lessons.length) * 100) : 0;
 
   return (
-    <>
-      <section className="bg-light py-5 border-bottom">
-        <div className="container py-4">
-          <h1 className="fw-bold">{path.title}</h1>
-          <p className="text-muted">{path.description}</p>
+    <div className="bg-light min-vh-100 pb-5">
+      <section className="bg-white border-bottom py-5 mb-4 shadow-sm">
+        <div className="container">
+          <button className="btn btn-link text-decoration-none p-0 mb-3" onClick={() => navigate(-1)}>← Back</button>
+          <div className="d-flex justify-content-between align-items-center">
+            <div>
+              <h1 className="fw-bolder">{path.title}</h1>
+              <p className="text-muted">{path.description}</p>
+            </div>
+            {user?.role === "student" && (
+              <div style={{ width: "200px" }}>
+                <div className="small fw-bold mb-1">PROGRESS: {progressPercent}%</div>
+                <div className="progress" style={{ height: "8px" }}><div className="progress-bar bg-success" style={{ width: `${progressPercent}%` }}></div></div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
-      {user?.role === "admin" && (
-        <section className="py-4 bg-white">
-          <div className="container">
-            {/* Add Lesson Form */}
-            <div className="card shadow-sm p-4 mb-4">
-              <h4 className="fw-bold mb-3">Add Lesson</h4>
-              <form onSubmit={handleAddLesson}>
-                <input 
-                  className="form-control mb-2" 
-                  placeholder="Lesson Title" 
-                  value={lessonForm.title} 
-                  onChange={e => setLessonForm({ ...lessonForm, title: e.target.value })} 
-                  required 
-                />
-                <textarea 
-                  className="form-control mb-2" 
-                  placeholder="Lesson Description (Paragraphs allowed)" 
-                  rows="3"
-                  style={{ overflowY: "auto" }}
-                  value={lessonForm.description} 
-                  onChange={e => setLessonForm({ ...lessonForm, description: e.target.value })} 
-                />
-                <button className="btn btn-primary">Add Lesson</button>
-              </form>
+      <div className="container">
+        {user?.role === "admin" ? (
+          <div className="row g-4">
+            <div className="col-lg-5">
+              <div className="card border-0 shadow-sm p-4 mb-4 rounded-4">
+                <h5 className="fw-bold text-primary mb-3">Add Lesson</h5>
+                <input className="form-control mb-2" placeholder="Title" value={lessonForm.title} onChange={e => setLessonForm({ ...lessonForm, title: e.target.value })} />
+                <textarea className="form-control mb-3" rows="3" placeholder="Description" value={lessonForm.description} onChange={e => setLessonForm({ ...lessonForm, description: e.target.value })} />
+                <button className="btn btn-primary w-100" onClick={handleAddLesson}>Add Lesson</button>
+              </div>
+
+              <div className="card border-0 shadow-sm p-4 rounded-4">
+                <h5 className="fw-bold text-primary mb-3">Create Quiz</h5>
+                <select className="form-select mb-3" value={selectedLessonForQuiz} onChange={e => setSelectedLessonForQuiz(e.target.value)}>
+                  <option value="">Attach to Lesson...</option>
+                  {lessons.map(l => <option key={l.id} value={l.id}>{l.title}</option>)}
+                </select>
+
+                {quizForm.map((q, qi) => (
+                  <div key={qi} className="border-bottom mb-4 pb-3">
+                    <div className="d-flex justify-content-between mb-2">
+                      <label className="fw-bold">Question {qi + 1}</label>
+                      {quizForm.length > 1 && <button className="btn btn-sm btn-outline-danger border-0" onClick={() => removeQuestion(qi)}>Remove</button>}
+                    </div>
+                    <input className="form-control mb-2" value={q.question} onChange={e => handleQuizFieldChange(qi, "question", e.target.value)} />
+                    
+                    {q.choices.map((c, ci) => (
+                      <div key={ci} className="input-group input-group-sm mb-1">
+                        <div className="input-group-text bg-white border-0">
+                          <input type="radio" name={`correct-${qi}`} checked={c.isCorrect} onChange={() => handleSetCorrect(qi, ci)} />
+                        </div>
+                        <input className="form-control border-0 bg-light" placeholder="Choice..." value={c.text} onChange={e => handleChoiceFieldChange(qi, ci, e.target.value)} />
+                        {q.choices.length > 2 && <button className="btn btn-outline-danger border-0" onClick={() => removeChoice(qi, ci)}>×</button>}
+                      </div>
+                    ))}
+                    <button className="btn btn-sm btn-link text-decoration-none p-0 mt-1" onClick={() => addChoice(qi)}>+ Add Choice</button>
+                  </div>
+                ))}
+                <button className="btn btn-outline-primary w-100 mb-2" onClick={addQuestion}>+ Add Another Question</button>
+                <button className="btn btn-primary w-100 fw-bold" onClick={handleAddQuiz}>Publish Quiz</button>
+              </div>
             </div>
 
-            {/* Add Quiz Form */}
-            <div className="card shadow-sm p-4 mb-4">
-              <h4 className="fw-bold mb-3">Add Quiz</h4>
-              <select className="form-select mb-2" value={selectedLessonForQuiz} onChange={e => setSelectedLessonForQuiz(e.target.value)}>
-                <option value="">-- Select Lesson --</option>
-                {lessons.map(l => <option key={l.id} value={l.id}>{l.title}</option>)}
-              </select>
-
-              {quizForm.map((q, qi) => (
-                <div key={qi} className="mb-3 border rounded p-3 bg-light">
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <label className="fw-bold">Question {qi + 1}</label>
-                    {quizForm.length > 1 && (
-                      <button type="button" className="btn btn-sm btn-danger" onClick={() => {
-                        const newForm = [...quizForm]; newForm.splice(qi, 1); setQuizForm(newForm);
-                      }}>Remove Question</button>
-                    )}
-                  </div>
-                  <input className="form-control mb-2" placeholder="Enter Question" value={q.question} onChange={e => {
-                    const newForm = [...quizForm]; newForm[qi].question = e.target.value; setQuizForm(newForm);
-                  }} />
-
-                  {q.choices.map((c, ci) => (
-                    <div key={ci} className="input-group mb-2">
-                      <input className="form-control" placeholder={`Choice ${ci + 1}`} value={c.text} onChange={e => {
-                        const newForm = [...quizForm]; newForm[qi].choices[ci].text = e.target.value; setQuizForm(newForm);
-                      }} />
-                      <span className="input-group-text">
-                        <input type="radio" name={`correct-${qi}`} checked={c.isCorrect} onChange={() => {
-                          const newForm = [...quizForm]; newForm[qi].choices.forEach((choice, i) => choice.isCorrect = i === ci); setQuizForm(newForm);
-                        }} />
-                      </span>
+            <div className="col-lg-7">
+              {lessons.map((l, idx) => (
+                <div key={l.id} className="card border-0 shadow-sm mb-3 rounded-4">
+                  <div className="card-body p-4">
+                    <div className="d-flex justify-content-between">
+                      <h5 className="fw-bold">{idx + 1}. {l.title}</h5>
+                      <div>
+                        <button className="btn btn-sm btn-light me-1" onClick={() => setEditLessonTarget(l)}>Edit</button>
+                        <button className="btn btn-sm btn-outline-danger" onClick={() => setDeleteTarget({ type: "lesson", id: l.id })}>Delete</button>
+                      </div>
                     </div>
-                  ))}
-                  <button type="button" className="btn btn-sm btn-outline-secondary mt-2" onClick={() => {
-                    const newForm = [...quizForm]; newForm[qi].choices.push({ text: "", isCorrect: false }); setQuizForm(newForm);
-                  }}>Add Choice</button>
+                    {quizzes.filter(q => q.lessonId === l.id).map(quiz => (
+                      <div key={quiz.id} className="mt-2 p-2 bg-light rounded d-flex justify-content-between align-items-center">
+                        <span className="small">📝 {quiz.title}</span>
+                        <div>
+                          <button className="btn btn-sm text-primary" onClick={() => setEditQuizTarget(quiz)}>Edit</button>
+                          <button className="btn btn-sm text-danger" onClick={() => setDeleteTarget({ type: "quiz", id: quiz.id })}>Delete</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
-              <div className="d-flex gap-2">
-                <button type="button" className="btn btn-outline-primary" onClick={() => setQuizForm([...quizForm, { question: "", choices: [{ text: "", isCorrect: false }] }])}>Add Another Question</button>
-                <button className="btn btn-primary" onClick={handleAddQuiz}>Publish Quiz</button>
-              </div>
             </div>
-
-            {/* Admin Content Lists */}
-            <h4 className="fw-bold mt-4">Lessons</h4>
-            {lessons.map(l => (
-              <div key={l.id} className="card p-3 mb-2 d-flex justify-content-between flex-row align-items-center shadow-sm">
-                <div style={{ maxWidth: "70%" }}>
-                  <h6 className="mb-0 fw-bold">{l.title}</h6>
-                  <p className="text-muted small mb-0 text-truncate">{l.description}</p>
-                </div>
-                <div>
-                  <button className="btn btn-sm btn-outline-primary me-2" onClick={() => setEditLessonTarget(l)}>Edit</button>
-                  <button className="btn btn-sm btn-outline-danger" onClick={() => setDeleteTarget({ type: "lesson", id: l.id })}>Delete</button>
-                </div>
-              </div>
-            ))}
-
-            <h4 className="fw-bold mt-4">Quizzes</h4>
-            {quizzes.map(q => (
-              <div key={q.id} className="card p-3 mb-2 d-flex justify-content-between flex-row align-items-center shadow-sm">
-                <h6 className="mb-0">{q.title}</h6>
-                <div>
-                  <button className="btn btn-sm btn-outline-primary me-2" onClick={() => setEditQuizTarget(q)}>Edit</button>
-                  <button className="btn btn-sm btn-outline-danger" onClick={() => setDeleteTarget({ type: "quiz", id: q.id })}>Delete</button>
-                </div>
-              </div>
-            ))}
           </div>
-        </section>
-      )}
+        ) : (
+          /* STUDENT VIEW (FIXED) */
+          <div className="row justify-content-center">
+            <div className="col-lg-8">
+              {lessons.map((lesson, idx) => {
+                const isCompleted = completedLessons.includes(lesson.id);
+
+                return (
+                  <div key={lesson.id} className="mb-5">
+                    <div className="card border-0 shadow-sm rounded-4 mb-3 overflow-hidden">
+                      <div className={`card-header py-3 border-0 ${isCompleted ? "bg-success text-white" : "bg-primary text-white"}`}>
+                        <h5 className="mb-0 fw-bold">Step {idx + 1}: {lesson.title}</h5>
+                      </div>
+                      <div className="card-body p-4">
+                        <p style={{ whiteSpace: "pre-wrap" }}>{lesson.description}</p>
+                        <button 
+                          className={`btn rounded-pill px-4 fw-bold ${isCompleted ? "btn-outline-secondary" : "btn-primary"}`} 
+                          onClick={() => isCompleted ? handleResetLesson(lesson.id) : handleCompleteLesson(lesson.id)}
+                        >
+                          {isCompleted ? "Read Again" : "Mark as Finished"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {quizzes.filter(q => q.lessonId === lesson.id).map(quiz => {
+                      const perfect = isQuizPerfect(quiz);
+                      const answers = studentAnswers[quiz.id] || {};
+                      const finished = Object.keys(answers).length === quiz.questions.length;
+
+                      return (
+                        <div key={quiz.id} className="card border-0 shadow-sm rounded-4 p-4 mb-4 ms-md-5 border-start border-4 border-primary">
+                          <div className="d-flex justify-content-between align-items-center mb-3">
+                            <h6 className="fw-bold text-primary m-0">Challenge: {quiz.title}</h6>
+                            {perfect ? <span className="badge bg-success">100% Locked</span> : finished && <button className="btn btn-sm btn-warning" onClick={() => handleRedoQuiz(quiz.id)}>Retake</button>}
+                          </div>
+                          {quiz.questions.map((q, qi) => (
+                            <div key={qi} className="mb-3">
+                              <p className="small fw-bold mb-2">{qi + 1}. {q.question}</p>
+                              <div className="d-flex flex-wrap gap-2">
+                                {q.choices.map((c, ci) => {
+                                  const selected = answers[qi] === ci;
+                                  let style = "btn-outline-light text-dark border";
+                                  if (selected) style = c.isCorrect ? "btn-success" : "btn-danger text-white";
+                                  return (
+                                    <button key={ci} className={`btn btn-sm rounded-pill px-3 ${style}`} disabled={answers[qi] !== undefined || perfect} onClick={() => handleAnswer(quiz.id, qi, ci, quiz)}>
+                                      {c.text}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* --- MODALS --- */}
       {editLessonTarget && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header"><h5>Edit Lesson</h5><button className="btn-close" onClick={() => setEditLessonTarget(null)}></button></div>
-              <div className="modal-body">
-                <label className="small fw-bold">Title</label>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 rounded-4">
+              <div className="modal-body p-4">
+                <h5 className="fw-bold mb-3">Edit Lesson</h5>
                 <input className="form-control mb-2" value={editLessonTarget.title} onChange={e => setEditLessonTarget({ ...editLessonTarget, title: e.target.value })} />
-                <label className="small fw-bold">Description</label>
-                <textarea 
-                  className="form-control" 
-                  rows="5"
-                  style={{ overflowY: "auto" }}
-                  value={editLessonTarget.description} 
-                  onChange={e => setEditLessonTarget({ ...editLessonTarget, description: e.target.value })} 
-                />
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setEditLessonTarget(null)}>Cancel</button>
-                <button className="btn btn-primary" onClick={handleUpdateLesson}>Save Changes</button>
+                <textarea className="form-control mb-3" rows="5" value={editLessonTarget.description} onChange={e => setEditLessonTarget({ ...editLessonTarget, description: e.target.value })} />
+                <div className="d-flex gap-2">
+                  <button className="btn btn-primary w-100" onClick={handleUpdateLesson}>Update</button>
+                  <button className="btn btn-light w-100" onClick={() => setEditLessonTarget(null)}>Cancel</button>
+                </div>
               </div>
             </div>
           </div>
@@ -322,42 +392,44 @@ function ViewPath() {
       )}
 
       {editQuizTarget && (
-        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)", overflowY: "auto" }}>
-          <div className="modal-dialog modal-lg">
-            <div className="modal-content">
-              <div className="modal-header"><h5>Edit Quiz</h5><button className="btn-close" onClick={() => setEditQuizTarget(null)}></button></div>
-              <div className="modal-body">
-                <input className="form-control mb-3 fw-bold" value={editQuizTarget.title} onChange={e => setEditQuizTarget({ ...editQuizTarget, title: e.target.value })} />
-                {editQuizTarget.questions.map((q, qi) => (
-                  <div key={qi} className="border p-3 mb-3 bg-light rounded">
-                    <div className="d-flex justify-content-between mb-2">
-                      <label className="fw-bold">Question {qi + 1}</label>
-                      <button className="btn btn-sm btn-danger" onClick={() => {
-                        const qs = [...editQuizTarget.questions]; qs.splice(qi, 1); setEditQuizTarget({ ...editQuizTarget, questions: qs });
-                      }}>Remove Question</button>
-                    </div>
-                    <input className="form-control mb-2" value={q.question} onChange={e => {
-                      const qs = [...editQuizTarget.questions]; qs[qi].question = e.target.value; setEditQuizTarget({ ...editQuizTarget, questions: qs });
-                    }} />
-                    {q.choices.map((c, ci) => (
-                      <div key={ci} className="input-group mb-1">
-                        <input className="form-control" value={c.text} onChange={e => {
-                          const qs = [...editQuizTarget.questions]; qs[qi].choices[ci].text = e.target.value; setEditQuizTarget({ ...editQuizTarget, questions: qs });
-                        }} />
-                        <span className="input-group-text">
-                          <input type="radio" name={`edit-correct-${qi}`} checked={c.isCorrect} onChange={() => {
-                            const qs = [...editQuizTarget.questions]; qs[qi].choices.forEach((choice, idx) => choice.isCorrect = idx === ci); setEditQuizTarget({ ...editQuizTarget, questions: qs });
-                          }} />
-                        </span>
-                      </div>
+        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.6)", overflowY: "auto" }}>
+          <div className="modal-dialog modal-lg modal-dialog-centered">
+            <div className="modal-content border-0 rounded-4 shadow">
+                <div className="modal-header border-0 p-4 pb-0">
+                    <h5 className="fw-bold">Edit Quiz</h5>
+                </div>
+                <div className="modal-body p-4">
+                    <input className="form-control mb-4 fw-bold" value={editQuizTarget.title} onChange={e => setEditQuizTarget({...editQuizTarget, title: e.target.value})} />
+                    {editQuizTarget.questions.map((q, qi) => (
+                        <div key={qi} className="bg-light p-3 rounded-3 mb-3">
+                            <input className="form-control mb-2" value={q.question} onChange={e => {
+                                const qs = [...editQuizTarget.questions];
+                                qs[qi].question = e.target.value;
+                                setEditQuizTarget({...editQuizTarget, questions: qs});
+                            }} />
+                            {q.choices.map((c, ci) => (
+                                <div key={ci} className="input-group mb-1">
+                                    <div className="input-group-text border-0 bg-transparent">
+                                        <input type="radio" checked={c.isCorrect} onChange={() => {
+                                            const qs = [...editQuizTarget.questions];
+                                            qs[qi].choices.forEach((choice, idx) => choice.isCorrect = idx === ci);
+                                            setEditQuizTarget({...editQuizTarget, questions: qs});
+                                        }} />
+                                    </div>
+                                    <input className="form-control" value={c.text} onChange={e => {
+                                        const qs = [...editQuizTarget.questions];
+                                        qs[qi].choices[ci].text = e.target.value;
+                                        setEditQuizTarget({...editQuizTarget, questions: qs});
+                                    }} />
+                                </div>
+                            ))}
+                        </div>
                     ))}
-                  </div>
-                ))}
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setEditQuizTarget(null)}>Cancel</button>
-                <button className="btn btn-primary" onClick={handleUpdateQuiz}>Update Quiz</button>
-              </div>
+                </div>
+                <div className="modal-footer border-0 p-4 pt-0">
+                    <button className="btn btn-light" onClick={() => setEditQuizTarget(null)}>Cancel</button>
+                    <button className="btn btn-primary" onClick={handleUpdateQuiz}>Save Changes</button>
+                </div>
             </div>
           </div>
         </div>
@@ -365,85 +437,18 @@ function ViewPath() {
 
       {deleteTarget && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header"><h5>Confirm Delete</h5></div>
-              <div className="modal-body">Are you sure you want to delete this {deleteTarget.type}?</div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
-                <button className="btn btn-danger" onClick={confirmDelete}>Delete</button>
+          <div className="modal-dialog modal-dialog-centered modal-sm">
+            <div className="modal-content border-0 rounded-4 p-4 text-center">
+              <h6 className="fw-bold mb-3">Delete this {deleteTarget.type}?</h6>
+              <div className="d-flex gap-2">
+                <button className="btn btn-danger w-100" onClick={confirmDelete}>Delete</button>
+                <button className="btn btn-light w-100" onClick={() => setDeleteTarget(null)}>Cancel</button>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Student View */}
-      {user?.role === "student" && (
-        <section className="py-5">
-          <div className="container">
-            <h4 className="fw-bold">Progress</h4>
-            <div className="progress mb-3"><div className="progress-bar bg-primary" style={{ width: `${progressPercent}%` }}></div></div>
-            
-            {lessons.map((lesson, index) => {
-              const completed = progress >= index + 1;
-              return (
-                <div key={lesson.id} className="mb-4">
-                  <div className={`card p-3 ${completed ? "border-success bg-light" : ""}`}>
-                    <h5>{index + 1}. {lesson.title}</h5>
-                    <p className="small text-muted" style={{ whiteSpace: "pre-wrap" }}>{lesson.description}</p>
-                    <button className={`btn btn-sm mt-2 ${completed ? "btn-success" : "btn-outline-primary"}`} onClick={() => handleCompleteLesson(lesson.id)}>{completed ? "Completed" : "Mark Done"}</button>
-                  </div>
-                  
-                  {quizzes.filter(q => q.lessonId === lesson.id).map(quiz => {
-                    const quizResults = studentAnswers[quiz.id];
-                    const quizFinished = quizResults && Object.keys(quizResults).length === quiz.questions.length;
-                    const perfect = isQuizPerfect(quiz);
-
-                    return (
-                      <div key={quiz.id} className="card p-3 ms-4 mt-2 shadow-sm border-0 bg-white">
-                        <div className="d-flex justify-content-between align-items-center mb-3">
-                          <h6 className="mb-0 fw-bold text-primary">Quiz: {quiz.title}</h6>
-                          {quizFinished && !perfect && (
-                            <button className="btn btn-sm btn-warning fw-bold" onClick={() => handleRedoQuiz(quiz.id)}>Redo Quiz</button>
-                          )}
-                          {perfect && <span className="badge bg-success p-2">Perfect Score! 🎉</span>}
-                        </div>
-
-                        {quiz.questions.map((q, i) => (
-                          <div key={i} className="mt-2 border-top pt-2">
-                            <p className="mb-2 fw-semibold">{q.question}</p>
-                            {q.choices.map((c, ci) => {
-                              const selectedIdx = studentAnswers[quiz.id]?.[i];
-                              const isSelected = selectedIdx === ci;
-                              let btnCls = "btn btn-sm btn-outline-secondary me-2 mb-1";
-                              if (isSelected) {
-                                btnCls = c.isCorrect ? "btn btn-sm btn-success me-2 mb-1" : "btn btn-sm btn-danger me-2 mb-1";
-                              }
-
-                              return (
-                                <button 
-                                  key={ci} 
-                                  className={btnCls} 
-                                  disabled={selectedIdx !== undefined} 
-                                  onClick={() => handleAnswer(quiz.id, i, ci)}
-                                >
-                                  {c.text}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-    </>
+    </div>
   );
 }
 
