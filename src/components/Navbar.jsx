@@ -22,20 +22,29 @@ function Navbar() {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       if (currentUser) {
         try {
+          // 1. Try to fetch custom data from Firestore
           const userDoc = await getDoc(doc(db, "users", currentUser.uid));
 
           if (userDoc.exists()) {
+            // Data found in Firestore (for both Email and Google users who have profiles)
             setUser({ uid: currentUser.uid, ...userDoc.data() });
           } else {
+            // 2. Fallback for Google Users (or users without a Firestore doc yet)
+            // currentUser.displayName comes directly from the Google Account
             setUser({
               uid: currentUser.uid,
-              fullname: "User",
-              role: "student",
+              fullname: currentUser.displayName || "User", 
+              role: "student", // Default role
             });
           }
         } catch (err) {
           console.error("Failed to fetch user info:", err);
-          setUser(null);
+          // If Firestore fails, still try to use the Auth name
+          setUser({
+            uid: currentUser.uid,
+            fullname: currentUser.displayName || "User",
+            role: "student",
+          });
         }
       } else {
         setUser(null);
@@ -62,7 +71,6 @@ function Navbar() {
       await signOut(auth);
       setUser(null);
       
-      // Show success modal
       setModal({
         show: true,
         title: "Logged Out",
@@ -71,7 +79,6 @@ function Navbar() {
         onConfirm: null,
       });
 
-      // Redirect after a short delay so they can see the message
       setTimeout(() => {
         setModal(prev => ({ ...prev, show: false }));
         navigate("/");
@@ -83,7 +90,6 @@ function Navbar() {
 
   // ✅ MENU BY ROLE
   const getMenuItems = () => {
-    // Not logged in
     if (!user) {
       return [
         { label: "Learning Paths", to: "/learningpaths" },
@@ -94,7 +100,6 @@ function Navbar() {
       ];
     }
 
-    // STUDENT
     if (user.role === "student") {
       return [
         { label: "Learning Paths", to: "/learningpaths" },
@@ -104,7 +109,6 @@ function Navbar() {
       ];
     }
 
-    // PROFESSOR
     if (user.role === "professor") {
       return [
         { label: "Classes", to: "/classes" },
@@ -112,7 +116,6 @@ function Navbar() {
       ];
     }
 
-    // ✅ ADMIN ONLY
     if (user.role === "admin") {
       return [
         { label: "Admin Dashboard", to: "/admin" },
@@ -165,18 +168,12 @@ function Navbar() {
               {!loading && !user && (
                 <>
                   <li className="nav-item">
-                    <Link
-                      className="btn btn-outline-primary btn-sm px-3"
-                      to="/login"
-                    >
+                    <Link className="btn btn-outline-primary btn-sm px-3" to="/login">
                       Login
                     </Link>
                   </li>
                   <li className="nav-item">
-                    <Link
-                      className="btn btn-primary btn-sm px-3 shadow-sm"
-                      to="/getstarted"
-                    >
+                    <Link className="btn btn-primary btn-sm px-3 shadow-sm" to="/getstarted">
                       Get Started
                     </Link>
                   </li>
@@ -186,7 +183,8 @@ function Navbar() {
               {!loading && user && (
                 <>
                   <li className="nav-item">
-                    <span className="nav-link fw-medium text-dark">
+                    {/* Displays name from Firestore or Google Profile */}
+                    <span className="nav-link fw-bold text-primary">
                       {user.fullname}
                     </span>
                   </li>
@@ -235,10 +233,7 @@ function Navbar() {
                 ) : (
                   <button 
                     className="btn btn-primary px-5 rounded-pill fw-bold w-100" 
-                    onClick={() => {
-                      setModal({ ...modal, show: false });
-                      navigate("/");
-                    }}
+                    onClick={() => setModal({ ...modal, show: false })}
                   >
                     Okay
                   </button>

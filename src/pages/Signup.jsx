@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { db, auth } from "../firebase";
 
@@ -10,7 +10,7 @@ function SignUp() {
 
   // Determine user role from query string
   const queryParams = new URLSearchParams(location.search);
-  const role = queryParams.get("role"); // "student" or "professor"
+  const role = queryParams.get("role") || "student"; // Default to student if null
 
   const title =
     role === "professor"
@@ -36,6 +36,7 @@ function SignUp() {
 
     try {
       // 1️⃣ Create user in Firebase Auth
+      // NOTE: Firebase Auth automatically hashes the password for you!
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -44,12 +45,13 @@ function SignUp() {
       const user = userCredential.user;
 
       // 2️⃣ Save user info in Firestore
+      // We REMOVED the "password" field here because storing it in Firestore 
+      // (even hashed) is redundant and less secure than using Firebase Auth's system.
       await setDoc(doc(db, "users", user.uid), {
-        fullname,
+        fullname: fullname.trim(),
         email: user.email,
-        password: password, 
-        role,
-        createdAt: new Date(),
+        role: role,
+        createdAt: serverTimestamp(), // Better than new Date() for database consistency
       });
 
       setModal({
