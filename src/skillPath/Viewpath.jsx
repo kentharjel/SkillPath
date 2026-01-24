@@ -68,11 +68,19 @@ function ViewPath() {
       if (!pathDoc.exists()) return navigate("/learningpaths");
       setPath({ id: pathDoc.id, ...pathDoc.data() });
 
+      // Fetch and Sort Lessons (Newest First)
       const lessonsSnap = await getDocs(collection(db, "content", pathId, "lessons"));
-      setLessons(lessonsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const sortedLessons = lessonsSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setLessons(sortedLessons);
 
+      // Fetch and Sort Quizzes (Newest First)
       const quizzesSnap = await getDocs(collection(db, "content", pathId, "quizzes"));
-      setQuizzes(quizzesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const sortedQuizzes = quizzesSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setQuizzes(sortedQuizzes);
 
       if (user?.uid) {
         const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
@@ -216,7 +224,6 @@ function ViewPath() {
 
   return (
     <div className="bg-light min-vh-100 pb-5">
-      {/* INJECTED HOVER STYLE */}
       <style>
         {`
           .choice-card-btn {
@@ -229,7 +236,6 @@ function ViewPath() {
             box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
             transform: translateY(-2px);
           }
-          /* Keep correct/incorrect colors solid regardless of hover */
           .choice-card-btn.answer-correct {
             background-color: #198754 !important;
             color: white !important;
@@ -281,7 +287,6 @@ function ViewPath() {
           /* --- ADMIN SECTION --- */
           <div className="row g-4">
             <div className="col-lg-5">
-              {/* Add Lesson Form */}
               <div className="card border-0 shadow-sm p-4 mb-4 rounded-4">
                 <h5 className="fw-bold text-primary mb-3">Add New Lesson</h5>
                 <input className="form-control mb-2" placeholder="Lesson Title" value={lessonForm.title} onChange={e => setLessonForm({ ...lessonForm, title: e.target.value })} />
@@ -289,7 +294,6 @@ function ViewPath() {
                 <button className="btn btn-primary w-100 fw-bold" onClick={handleAddLesson}>Create Lesson</button>
               </div>
 
-              {/* Create Quiz Form */}
               <div className="card border-0 shadow-sm p-4 rounded-4">
                 <h5 className="fw-bold text-primary mb-3">Create Quiz</h5>
                 <label className="small fw-bold text-muted mb-1">SELECT LESSON TO ATTACH</label>
@@ -329,15 +333,12 @@ function ViewPath() {
             <div className="col-lg-7">
               <h5 className="fw-bold mb-3">Curriculum Preview</h5>
               {lessons.map((l, idx) => {
-                // ATTACH QUIZ TO LESSON FOR ADMIN VIEW
                 const attachedQuiz = quizzes.find(q => q.lessonId === l.id);
-
                 return (
                   <div key={l.id} className="card border-0 shadow-sm mb-4 rounded-4 overflow-hidden">
                     <div className="card-body p-4">
                       <div className="d-flex justify-content-between align-items-start mb-2">
                         <div>
-                          <span className="badge bg-secondary mb-1">Lesson {idx + 1}</span>
                           <h5 className="fw-bold mb-0">{l.title}</h5>
                         </div>
                         <div className="d-flex gap-2">
@@ -346,8 +347,6 @@ function ViewPath() {
                         </div>
                       </div>
                       <p className="text-muted small text-truncate" style={{ maxWidth: "400px" }}>{l.description}</p>
-                      
-                      {/* Attached Quiz Section inside Admin Lesson Card */}
                       <div className="mt-3 pt-3 border-top">
                         {attachedQuiz ? (
                           <div className="bg-light p-3 rounded-3 d-flex justify-content-between align-items-center">
@@ -376,7 +375,6 @@ function ViewPath() {
           /* --- STUDENT VIEW ENGINE --- */
           <div className="row justify-content-center">
             <div className="col-lg-10">
-              
               {viewMode === "list" && (
                 <div>
                   <h4 className="fw-bold mb-4 text-secondary">Course Curriculum</h4>
@@ -384,12 +382,10 @@ function ViewPath() {
                     const isCompleted = completedLessons.includes(lesson.id);
                     const lessonQuiz = quizzes.find(q => q.lessonId === lesson.id);
                     const quizDone = isQuizPerfect(lessonQuiz);
-
                     return (
                       <div key={lesson.id} className="card border-0 shadow-sm rounded-4 mb-3 p-2 border-start border-5 border-primary">
                         <div className="card-body d-flex justify-content-between align-items-center">
                           <div>
-                            <span className="text-primary small fw-bold text-uppercase">Module {idx + 1}</span>
                             <h4 className="fw-bold mb-1">{lesson.title}</h4>
                             <div className="d-flex gap-3">
                               <span className={`small ${isCompleted ? 'text-success fw-bold' : 'text-muted'}`}>
@@ -470,7 +466,6 @@ function ViewPath() {
                             if (selected) {
                                 extraClass = c.isCorrect ? "answer-correct" : "answer-incorrect";
                             }
-                            
                             return (
                               <div key={ci} className="col-md-6">
                                 <button 
