@@ -10,7 +10,9 @@ import {
   getDocs, 
   addDoc, 
   updateDoc, 
+  deleteDoc,
   arrayUnion, 
+  arrayRemove,
   serverTimestamp 
 } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
@@ -26,6 +28,15 @@ function Classes() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [classCodeInput, setClassCodeInput] = useState("");
   const [newClassName, setNewClassName] = useState("");
+
+  // Confirmation Modal State
+  const [confirmModal, setConfirmModal] = useState({
+    show: false,
+    title: "",
+    message: "",
+    onConfirm: null,
+    classId: null
+  });
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -101,6 +112,41 @@ function Classes() {
     fetchClasses(user);
   };
 
+  /* TRIGGER DELETE MODAL */
+  const triggerDelete = (classId, className) => {
+    setConfirmModal({
+      show: true,
+      title: "Delete Class",
+      message: `Are you sure you want to delete "${className}"? This action cannot be undone and all student data will be lost.`,
+      onConfirm: async () => {
+        await deleteDoc(doc(db, "classes", classId));
+        fetchClasses(user);
+      }
+    });
+  };
+
+  /* TRIGGER UNENROLL MODAL */
+  const triggerUnenroll = (classId, className) => {
+    setConfirmModal({
+      show: true,
+      title: "Unenroll Class",
+      message: `Are you sure you want to unenroll from "${className}"?`,
+      onConfirm: async () => {
+        await updateDoc(doc(db, "classes", classId), {
+          students: arrayRemove(user.uid)
+        });
+        fetchClasses(user);
+      }
+    });
+  };
+
+  const handleConfirmAction = async () => {
+    if (confirmModal.onConfirm) {
+      await confirmModal.onConfirm();
+    }
+    setConfirmModal({ ...confirmModal, show: false });
+  };
+
   return (
     <>
       <section className="bg-light py-5 border-bottom">
@@ -133,7 +179,13 @@ function Classes() {
               </div>
             ) : classList.length > 0 ? (
               classList.map(cls => (
-                <ClassCard key={cls.id} cls={cls} userRole={user.role} />
+                <ClassCard 
+                  key={cls.id} 
+                  cls={cls} 
+                  userRole={user.role} 
+                  onDelete={() => triggerDelete(cls.id, cls.className)} 
+                  onUnenroll={() => triggerUnenroll(cls.id, cls.className)}
+                />
               ))
             ) : (
               <div className="text-center py-5 text-muted">No classes found. Join or create one to get started!</div>
@@ -146,14 +198,14 @@ function Classes() {
       {showJoinModal && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="modal-dialog">
-            <form className="modal-content" onSubmit={handleJoinClass}>
-              <div className="modal-header"><h5>Join Class</h5></div>
+            <form className="modal-content border-0 shadow rounded-4" onSubmit={handleJoinClass}>
+              <div className="modal-header border-0"><h5>Join Class</h5></div>
               <div className="modal-body">
-                <input className="form-control" placeholder="Enter 6-digit Class Code" value={classCodeInput} onChange={e => setClassCodeInput(e.target.value)} required />
+                <input className="form-control form-control-lg" placeholder="Enter 6-digit Class Code" value={classCodeInput} onChange={e => setClassCodeInput(e.target.value)} required />
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowJoinModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Join</button>
+              <div className="modal-footer border-0">
+                <button type="button" className="btn btn-light" onClick={() => setShowJoinModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary px-4">Join</button>
               </div>
             </form>
           </div>
@@ -164,16 +216,36 @@ function Classes() {
       {showCreateModal && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="modal-dialog">
-            <form className="modal-content" onSubmit={handleCreateClass}>
-              <div className="modal-header"><h5>Create New Class</h5></div>
+            <form className="modal-content border-0 shadow rounded-4" onSubmit={handleCreateClass}>
+              <div className="modal-header border-0"><h5>Create New Class</h5></div>
               <div className="modal-body">
-                <input className="form-control" placeholder="Class Name (e.g. CS-101)" value={newClassName} onChange={e => setNewClassName(e.target.value)} required />
+                <input className="form-control form-control-lg" placeholder="Class Name (e.g. CS-101)" value={newClassName} onChange={e => setNewClassName(e.target.value)} required />
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Create</button>
+              <div className="modal-footer border-0">
+                <button type="button" className="btn btn-light" onClick={() => setShowCreateModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary px-4">Create</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* GLOBAL CONFIRMATION MODAL */}
+      {confirmModal.show && (
+        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.7)", zIndex: 1060 }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 shadow-lg rounded-4">
+              <div className="modal-header border-0 pt-4 px-4">
+                <h5 className="fw-bold text-danger mb-0">{confirmModal.title}</h5>
+              </div>
+              <div className="modal-body px-4 py-3">
+                <p className="text-muted mb-0">{confirmModal.message}</p>
+              </div>
+              <div className="modal-footer border-0 pb-4 px-4">
+                <button type="button" className="btn btn-light rounded-pill px-4" onClick={() => setConfirmModal({ ...confirmModal, show: false })}>Cancel</button>
+                <button type="button" className="btn btn-danger rounded-pill px-4" onClick={handleConfirmAction}>Confirm</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -181,13 +253,32 @@ function Classes() {
   );
 }
 
-const ClassCard = ({ cls, userRole }) => (
+const ClassCard = ({ cls, userRole, onDelete, onUnenroll }) => (
   <div className="col-md-4">
     <div className="card h-100 border-0 shadow-sm rounded-4">
       <div className="card-body p-4">
-        <div className="d-flex justify-content-between">
+        <div className="d-flex justify-content-between align-items-start">
             <span className="badge bg-primary mb-3">Class</span>
-            {userRole === "professor" && <span className="text-primary fw-bold small">{cls.classCode}</span>}
+            {userRole === "professor" ? (
+              <div className="text-end">
+                <span className="text-primary d-block fw-bold small">{cls.classCode}</span>
+                <button 
+                  onClick={onDelete} 
+                  className="btn btn-sm text-danger p-0 mt-1" 
+                  style={{ fontSize: "0.75rem" }}
+                >
+                  Delete Class
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={onUnenroll} 
+                className="btn btn-sm text-danger p-0" 
+                style={{ fontSize: "0.75rem" }}
+              >
+                Unenroll
+              </button>
+            )}
         </div>
         <h5 className="fw-bold">{cls.className}</h5>
         <ul className="list-unstyled small text-muted mt-3">

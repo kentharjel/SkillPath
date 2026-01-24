@@ -24,6 +24,24 @@ function LearningPaths() {
     description: "",
   });
 
+  // Modal States
+  const [modal, setModal] = useState({
+    show: false,
+    title: "",
+    message: "",
+    isConfirm: false,
+    onConfirm: null,
+  });
+
+  // Helper to show modal
+  const showAlert = (title, message) => {
+    setModal({ show: true, title, message, isConfirm: false, onConfirm: null });
+  };
+
+  const showConfirm = (title, message, onConfirm) => {
+    setModal({ show: true, title, message, isConfirm: true, onConfirm });
+  };
+
   // FETCH USER & APPLIED PATHS
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
@@ -77,7 +95,9 @@ function LearningPaths() {
   // ADD PATH (Admin)
   const handleAddPath = async (e) => {
     e.preventDefault();
-    if (!form.title || !form.description) return alert("All fields are required");
+    if (!form.title || !form.description) {
+      return showAlert("Missing Info", "All fields are required to publish a path.");
+    }
 
     await addDoc(collection(db, "content"), {
       title: form.title,
@@ -88,21 +108,29 @@ function LearningPaths() {
     });
 
     setForm({ title: "", level: "Beginner", description: "" });
-    window.location.reload(); // Refresh to show new path
+    showAlert("Success!", "The learning path has been published.");
+    // Re-fetch instead of reload for better UX
+    const snap = await getDocs(collection(db, "content"));
+    setPaths(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.type === "learning_path"));
   };
 
   // DELETE PATH (Admin)
   const handleDeletePath = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this learning path?")) return;
-    await deleteDoc(doc(db, "content", id));
-    setPaths((prev) => prev.filter((p) => p.id !== id));
+    showConfirm(
+      "Delete Path",
+      "Are you sure you want to delete this learning path? This action cannot be undone.",
+      async () => {
+        await deleteDoc(doc(db, "content", id));
+        setPaths((prev) => prev.filter((p) => p.id !== id));
+      }
+    );
   };
 
   // APPLY PATH (Student)
   const handleApplyPath = async (pathId) => {
     if (!user) {
-      alert("You must log in to apply for this learning path.");
-      navigate("/login");
+      showAlert("Login Required", "You must log in to apply for this learning path.");
+      setTimeout(() => navigate("/login"), 2000);
       return;
     }
     if (user.role !== "student") return;
@@ -114,7 +142,7 @@ function LearningPaths() {
     });
 
     setAppliedPaths((prev) => [...prev, pathId]);
-    alert("Successfully applied to the learning path!");
+    showAlert("Enrolled!", "Successfully applied to the learning path. Happy learning!");
   };
 
   if (loading) {
@@ -144,7 +172,7 @@ function LearningPaths() {
 
       <div className="container py-5">
         <div className="row g-5">
-          {/* ADMIN FORM - SIDEBAR STYLE */}
+          {/* ADMIN FORM */}
           {user?.role === "admin" && (
             <div className="col-lg-4">
               <div className="card shadow-sm border-0 rounded-4 sticky-top" style={{ top: "20px" }}>
@@ -196,7 +224,7 @@ function LearningPaths() {
             </div>
           )}
 
-          {/* LEARNING PATHS LIST */}
+          {/* LIST */}
           <div className={user?.role === "admin" ? "col-lg-8" : "col-12"}>
             <div className="d-flex justify-content-between align-items-center mb-4">
               <h3 className="fw-bold m-0 text-dark">Available Paths</h3>
@@ -293,6 +321,44 @@ function LearningPaths() {
         </div>
       </div>
 
+      {/* CUSTOM MODAL COMPONENT */}
+      {modal.show && (
+        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1050 }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 shadow-lg rounded-4">
+              <div className="modal-header border-0 pb-0 pt-4 px-4">
+                <h5 className="fw-bold text-dark">{modal.title}</h5>
+              </div>
+              <div className="modal-body p-4">
+                <p className="text-muted mb-0">{modal.message}</p>
+              </div>
+              <div className="modal-footer border-0 pt-0 pb-4 px-4">
+                {modal.isConfirm ? (
+                  <>
+                    <button className="btn btn-light px-4 rounded-pill fw-bold" onClick={() => setModal({ ...modal, show: false })}>
+                      Cancel
+                    </button>
+                    <button 
+                      className="btn btn-danger px-4 rounded-pill fw-bold" 
+                      onClick={async () => {
+                        await modal.onConfirm();
+                        setModal({ ...modal, show: false });
+                      }}
+                    >
+                      Confirm
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn btn-primary px-5 rounded-pill fw-bold" onClick={() => setModal({ ...modal, show: false })}>
+                    Okay
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         .hover-shadow:hover {
           transform: translateY(-5px);
@@ -304,6 +370,7 @@ function LearningPaths() {
         .bg-primary-subtle { background-color: #e7f1ff; }
         .bg-success-subtle { background-color: #e6fcf5; }
         .bg-danger-subtle { background-color: #fff5f5; }
+        .tracking-widest { letter-spacing: 0.1em; }
       `}</style>
     </div>
   );

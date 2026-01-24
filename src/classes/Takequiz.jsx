@@ -11,7 +11,8 @@ function TakeQuiz() {
   const [quiz, setQuiz] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [hasPerfectScore, setHasPerfectScore] = useState(false);
+  const [alreadyAttempted, setAlreadyAttempted] = useState(false);
+  const [previousScore, setPreviousScore] = useState(null);
 
   // Quiz Interaction State
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -20,7 +21,6 @@ function TakeQuiz() {
   const [score, setScore] = useState(0);
 
   // Admin Edit State
-  const [isEditing, setIsEditing] = useState(false);
   const [editQuestions, setEditQuestions] = useState([]);
 
   useEffect(() => {
@@ -39,16 +39,21 @@ function TakeQuiz() {
           setQuiz(data);
           setEditQuestions(data.questions || []);
 
-          // 2. If student, check for perfect score in previous attempts
+          // 2. No Retake Logic: Check for previous attempt and get the score
           if (userData.role === "student") {
             const attemptsRef = collection(db, `classes/${classId}/attempts`);
             const q = query(attemptsRef, 
               where("studentId", "==", currentUser.uid), 
-              where("quizId", "==", contentId),
-              where("score", "==", 100)
+              where("quizId", "==", contentId)
             );
             const attemptSnaps = await getDocs(q);
-            if (!attemptSnaps.empty) setHasPerfectScore(true);
+            
+            if (!attemptSnaps.empty) {
+              // Get the score from the first found attempt
+              const attemptData = attemptSnaps.docs[0].data();
+              setPreviousScore(attemptData.score);
+              setAlreadyAttempted(true);
+            }
           }
         }
       }
@@ -64,7 +69,6 @@ function TakeQuiz() {
         questions: editQuestions
       });
       setQuiz({ ...quiz, questions: editQuestions });
-      setIsEditing(false);
       alert("Quiz updated successfully!");
     } catch (err) {
       console.error(err);
@@ -96,6 +100,7 @@ function TakeQuiz() {
     setScore(finalScore);
     setIsFinished(true);
 
+    // Save attempt to Firestore
     await addDoc(collection(db, `classes/${classId}/attempts`), {
       studentId: user.uid,
       studentName: user.fullname || "Student",
@@ -139,33 +144,40 @@ function TakeQuiz() {
     );
   }
 
-  // --- RENDER: STUDENT VIEW (LOCKED) ---
-  if (hasPerfectScore && !isFinished) {
+  // --- RENDER: STUDENT VIEW (LOCKED - SHOW PREVIOUS SCORE) ---
+  if (alreadyAttempted && !isFinished) {
     return (
       <div className="container py-5 text-center">
         <div className="card border-0 shadow-lg p-5 rounded-4 mx-auto" style={{ maxWidth: "500px" }}>
-          <div className="display-1 mb-4">🏆</div>
-          <h2 className="fw-bold">Mastered!</h2>
-          <p className="text-muted">You have already achieved a perfect score on this quiz. Retakes are only available if you haven't mastered the material yet.</p>
+          <div className="display-1 mb-4">✅</div>
+          <h2 className="fw-bold">Quiz Already Done</h2>
+          <p className="text-muted mt-3">
+            You have already submitted your answers for <strong>{quiz?.title}</strong>. 
+            Your recorded score is:
+          </p>
+          <div className="display-4 fw-bold text-primary mb-3">{previousScore}%</div>
+          <p className="small text-muted mb-4">Retakes are not allowed for this assessment.</p>
           <button className="btn btn-primary rounded-pill px-5" onClick={() => navigate(-1)}>Return to Class</button>
         </div>
       </div>
     );
   }
 
-  // --- RENDER: STUDENT VIEW (TAKING QUIZ) ---
+  // --- RENDER: STUDENT VIEW (RESULT SCREEN FOR NEW ATTEMPT) ---
   if (isFinished) {
     return (
       <div className="container py-5 text-center">
         <div className="card border-0 shadow-lg p-5 rounded-4 mx-auto" style={{ maxWidth: "500px" }}>
-          <div className="display-4 mb-3">{score === 100 ? "🌟 Perfect!" : "👍 Good Effort"}</div>
+          <div className="display-4 mb-3">{score === 100 ? "🌟 Perfect!" : "✅ Submitted"}</div>
           <h2 className="fw-bold">{score}%</h2>
+          <p className="text-muted">Your score has been successfully recorded.</p>
           <button className="btn btn-primary mt-4 px-5 rounded-pill" onClick={() => navigate(-1)}>Finish</button>
         </div>
       </div>
     );
   }
 
+  // --- RENDER: STUDENT VIEW (TAKING QUIZ) ---
   const q = quiz.questions[currentQuestion];
   return (
     <div className="container py-5">

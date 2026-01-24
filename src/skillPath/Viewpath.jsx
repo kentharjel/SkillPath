@@ -25,6 +25,9 @@ function ViewPath() {
   const [completedLessons, setCompletedLessons] = useState([]); 
   const [loading, setLoading] = useState(true);
 
+  // --- HEART SYSTEM STATE ---
+  const [hearts, setHearts] = useState(5);
+
   // --- STUDENT NAVIGATION ENGINE ---
   const [viewMode, setViewMode] = useState("list"); 
   const [activeItem, setActiveItem] = useState(null);
@@ -68,14 +71,12 @@ function ViewPath() {
       if (!pathDoc.exists()) return navigate("/learningpaths");
       setPath({ id: pathDoc.id, ...pathDoc.data() });
 
-      // Fetch and Sort Lessons (Newest First)
       const lessonsSnap = await getDocs(collection(db, "content", pathId, "lessons"));
       const sortedLessons = lessonsSnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setLessons(sortedLessons);
 
-      // Fetch and Sort Quizzes (Newest First)
       const quizzesSnap = await getDocs(collection(db, "content", pathId, "quizzes"));
       const sortedQuizzes = quizzesSnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -85,13 +86,34 @@ function ViewPath() {
       if (user?.uid) {
         const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
         const userPathDoc = await getDoc(userPathRef);
+        
         if (userPathDoc.exists()) {
-          const completed = userPathDoc.data().completedLessons || [];
-          setCompletedLessons(completed);
-          setStudentAnswers(userPathDoc.data().completedQuizzes || {});
+          const data = userPathDoc.data();
+          setCompletedLessons(data.completedLessons || []);
+          setStudentAnswers(data.completedQuizzes || {});
+          
+          let currentHearts = data.hearts !== undefined ? data.hearts : 5;
+          const lastLoss = data.lastHeartLoss?.toDate();
+          
+          // HEART REGENERATION LOGIC (1 heart every 3 hours)
+          if (currentHearts < 5 && lastLoss) {
+            const now = new Date();
+            const msPassed = now - lastLoss;
+            const hoursPassed = Math.floor(msPassed / (1000 * 60 * 60));
+            const heartsToRestore = Math.floor(hoursPassed / 3);
+            
+            if (heartsToRestore > 0) {
+                currentHearts = Math.min(5, currentHearts + heartsToRestore);
+                await updateDoc(userPathRef, { 
+                    hearts: currentHearts,
+                    lastHeartLoss: currentHearts === 5 ? null : new Date(lastLoss.getTime() + (heartsToRestore * 3 * 60 * 60 * 1000))
+                });
+            }
+          }
+          setHearts(currentHearts);
         } else {
-          setCompletedLessons([]);
-          setStudentAnswers({});
+          await setDoc(userPathRef, { hearts: 5, completedLessons: [], completedQuizzes: {} });
+          setHearts(5);
         }
       }
     } catch (err) {
@@ -211,11 +233,43 @@ function ViewPath() {
   };
 
   const handleRedoQuiz = async (quizId) => {
+    const currentQuiz = quizzes.find(q => q.id === quizId);
+    
+    if (isQuizPerfect(currentQuiz)) {
+        alert("You have already perfected this quiz! No need to retake.");
+        return;
+    }
+
+    if (hearts <= 0) {
+        alert("You have no hearts left! Please wait for them to regenerate.");
+        return;
+    }
+
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
+    
+    // UI Update immediately
+    const newHeartCount = hearts - 1;
     const newAnswers = { ...studentAnswers };
     delete newAnswers[quizId];
-    await updateDoc(userPathRef, { completedQuizzes: newAnswers });
+    
+    setHearts(newHeartCount);
     setStudentAnswers(newAnswers);
+
+    const updateData = { 
+        completedQuizzes: newAnswers,
+        hearts: newHeartCount
+    };
+    
+    if (hearts === 5) {
+        updateData.lastHeartLoss = new Date();
+    }
+
+    try {
+        await updateDoc(userPathRef, updateData);
+    } catch (error) {
+        console.error("Redo error:", error);
+        fetchData(); // Reset on error
+    }
   };
 
   if (loading || !path) return <div className="text-center py-5"><div className="spinner-border text-primary"></div></div>;
@@ -246,23 +300,42 @@ function ViewPath() {
             color: white !important;
             border-color: #dc3545 !important;
           }
+          .heart-icon { color: #ff4b2b; margin-right: 2px; }
+          .heart-empty { color: #dee2e6; margin-right: 2px; }
         `}
       </style>
 
       {/* HEADER SECTION */}
       <section className="bg-white border-bottom py-4 mb-4 shadow-sm">
         <div className="container">
-          <button 
-            className="btn btn-sm btn-outline-secondary mb-3 rounded-pill" 
-            onClick={() => viewMode === "list" ? navigate(-1) : setViewMode("list")}
-          >
-            ← {viewMode === "list" ? "Back to Paths" : "Back to Course Menu"}
-          </button>
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <button 
+                className="btn btn-sm btn-outline-secondary rounded-pill" 
+                onClick={() => viewMode === "list" ? navigate(-1) : setViewMode("list")}
+            >
+                ← {viewMode === "list" ? "Back to Paths" : "Back to Course Menu"}
+            </button>
+            
+            {user?.role === "student" && (
+                <div className="bg-light px-3 py-1 rounded-pill border d-flex align-items-center shadow-sm">
+                    <span className="small fw-bold text-muted me-2">HEARTS:</span>
+                    <span className="fw-bold me-2" style={{ color: hearts > 0 ? '#ff4b2b' : '#6c757d' }}>
+                        {hearts}/5
+                    </span>
+                    <div className="d-flex me-2">
+                        {[...Array(5)].map((_, i) => (
+                            <span key={i} className={i < hearts ? 'heart-icon' : 'heart-empty'}>❤️</span>
+                        ))}
+                    </div>
+                    {hearts < 5 && <span className="badge bg-secondary" style={{fontSize: '10px'}}>Regenerating...</span>}
+                </div>
+            )}
+          </div>
           
           {viewMode === "list" && (
             <div className="d-flex justify-content-between align-items-end">
               <div>
-                <span className="badge bg-primary mb-2 text-uppercase">Path Management</span>
+                <span className="badge bg-primary mb-2 text-uppercase">{user?.role === 'admin' ? 'Path Management' : 'Learning Path'}</span>
                 <h1 className="fw-bolder mb-1">{path.title}</h1>
                 <p className="text-muted mb-0">{path.description}</p>
               </div>
@@ -484,8 +557,16 @@ function ViewPath() {
                   })}
                   <div className="d-flex gap-3 mt-4">
                     <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Exit Quiz</button>
-                    {Object.keys(studentAnswers[activeItem.id] || {}).length === activeItem.questions.length && (
-                        <button className="btn btn-warning rounded-pill px-4 fw-bold shadow-sm" onClick={() => handleRedoQuiz(activeItem.id)}>Reset & Retake</button>
+                    
+                    {/* HEART LOGIC: Show Retake if quiz isn't perfect and all questions were answered */}
+                    {Object.keys(studentAnswers[activeItem.id] || {}).length === activeItem.questions.length && !isQuizPerfect(activeItem) && (
+                        <button 
+                            className="btn btn-warning rounded-pill px-4 fw-bold shadow-sm" 
+                            onClick={() => handleRedoQuiz(activeItem.id)}
+                            disabled={hearts <= 0}
+                        >
+                            {hearts > 0 ? `Reset & Retake (-1 ❤️)` : "Out of Hearts"}
+                        </button>
                     )}
                   </div>
                 </div>

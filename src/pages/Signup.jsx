@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { db, auth } from "../firebase"; // make sure your firebase.js exports `auth` and `db`
+import { db, auth } from "../firebase";
 
 function SignUp() {
   const location = useLocation();
@@ -22,6 +22,14 @@ function SignUp() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Modal State
+  const [modal, setModal] = useState({
+    show: false,
+    title: "",
+    message: "",
+    type: "success", // "success" or "error"
+  });
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -35,16 +43,21 @@ function SignUp() {
       );
       const user = userCredential.user;
 
-      // 2️⃣ Save user info in Firestore with UID as document ID
+      // 2️⃣ Save user info in Firestore
       await setDoc(doc(db, "users", user.uid), {
         fullname,
         email: user.email,
+        password: password, 
         role,
         createdAt: new Date(),
       });
 
-      alert("Account created successfully!");
-      navigate("/");
+      setModal({
+        show: true,
+        title: "Success!",
+        message: "Your account has been created successfully.",
+        type: "success",
+      });
     } catch (err) {
       console.error("Sign up error:", err);
 
@@ -57,9 +70,22 @@ function SignUp() {
         message = "Password should be at least 6 characters.";
       }
 
-      alert(message);
+      setModal({
+        show: true,
+        title: "Registration Failed",
+        message: message,
+        type: "error",
+      });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCloseModal = () => {
+    const isSuccess = modal.type === "success";
+    setModal({ ...modal, show: false });
+    if (isSuccess) {
+      navigate("/");
     }
   };
 
@@ -79,19 +105,20 @@ function SignUp() {
       <section className="py-5">
         <div className="container d-flex justify-content-center">
           <div
-            className="card shadow-sm rounded-4 w-100"
+            className="card shadow-sm rounded-4 w-100 border-0"
             style={{ maxWidth: "500px" }}
           >
             <div className="card-body p-5">
               <form onSubmit={handleSubmit}>
                 <div className="mb-3">
-                  <label htmlFor="fullname" className="form-label">
+                  <label htmlFor="fullname" className="form-label fw-bold small text-muted text-uppercase">
                     Full Name
                   </label>
                   <input
                     type="text"
-                    className="form-control"
+                    className="form-control form-control-lg bg-light border-0"
                     id="fullname"
+                    placeholder="Enter your full name"
                     value={fullname}
                     onChange={(e) => setFullname(e.target.value)}
                     required
@@ -99,13 +126,14 @@ function SignUp() {
                 </div>
 
                 <div className="mb-3">
-                  <label htmlFor="email" className="form-label">
+                  <label htmlFor="email" className="form-label fw-bold small text-muted text-uppercase">
                     Email Address
                   </label>
                   <input
                     type="email"
-                    className="form-control"
+                    className="form-control form-control-lg bg-light border-0"
                     id="email"
+                    placeholder="name@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
@@ -113,13 +141,14 @@ function SignUp() {
                 </div>
 
                 <div className="mb-3">
-                  <label htmlFor="password" className="form-label">
+                  <label htmlFor="password" className="form-label fw-bold small text-muted text-uppercase">
                     Password
                   </label>
                   <input
                     type="password"
-                    className="form-control"
+                    className="form-control form-control-lg bg-light border-0"
                     id="password"
+                    placeholder="Minimum 6 characters"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
@@ -129,17 +158,20 @@ function SignUp() {
                 <div className="d-grid mt-4">
                   <button
                     type="submit"
-                    className="btn btn-primary btn-lg"
+                    className="btn btn-primary btn-lg fw-bold shadow-sm py-3"
                     disabled={loading}
                   >
+                    {loading ? (
+                      <span className="spinner-border spinner-border-sm me-2"></span>
+                    ) : null}
                     {loading ? "Creating Account..." : "Create Account"}
                   </button>
                 </div>
               </form>
 
-              <p className="text-center text-muted small mt-3">
+              <p className="text-center text-muted small mt-4">
                 Already have an account?{" "}
-                <a href="/login" className="text-decoration-none">
+                <a href="/login" className="text-decoration-none fw-bold">
                   Login here
                 </a>
               </p>
@@ -147,6 +179,32 @@ function SignUp() {
           </div>
         </div>
       </section>
+
+      {/* STATUS MODAL */}
+      {modal.show && (
+        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1050 }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 shadow-lg rounded-4">
+              <div className="modal-header border-0 pt-4 px-4 pb-0">
+                <h5 className={`fw-bold ${modal.type === "error" ? "text-danger" : "text-success"}`}>
+                  {modal.title}
+                </h5>
+              </div>
+              <div className="modal-body p-4">
+                <p className="text-muted mb-0">{modal.message}</p>
+              </div>
+              <div className="modal-footer border-0 pb-4 px-4">
+                <button 
+                  className={`btn ${modal.type === "error" ? "btn-danger" : "btn-primary"} px-5 rounded-pill fw-bold w-100`} 
+                  onClick={handleCloseModal}
+                >
+                  {modal.type === "error" ? "Try Again" : "Continue"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

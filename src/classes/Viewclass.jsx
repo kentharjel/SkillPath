@@ -24,6 +24,14 @@ function ViewClass() {
   const [classContent, setClassContent] = useState([]);
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // State to track completed quizzes for students
+  const [studentAttempts, setStudentAttempts] = useState([]);
+  // State for Professor to see all scores
+  const [allQuizScores, setAllQuizScores] = useState([]);
+
+  // Search State for Professor
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Lesson State
   const [showLessonModal, setShowLessonModal] = useState(false);
@@ -59,12 +67,30 @@ function ViewClass() {
       );
       setClassContent(contentSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
+      // Logic for Students
+      if (userData.role === "student") {
+        const attemptsSnap = await getDocs(
+          query(
+            collection(db, `classes/${classId}/attempts`), 
+            where("studentId", "==", userData.uid)
+          )
+        );
+        const attemptedQuizIds = attemptsSnap.docs.map(doc => doc.data().quizId);
+        setStudentAttempts(attemptedQuizIds);
+      }
+
+      // Logic for Professors
       if (userData.role === "professor") {
         const cData = classSnap.data();
         if (cData.students?.length > 0) {
           const sSnap = await getDocs(query(collection(db, "users"), where("__name__", "in", cData.students)));
           setStudents(sSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         }
+        
+        const allAttemptsSnap = await getDocs(
+          query(collection(db, `classes/${classId}/attempts`), orderBy("completedAt", "desc"))
+        );
+        setAllQuizScores(allAttemptsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
     } catch (err) { 
       console.error(err); 
@@ -172,42 +198,53 @@ function ViewClass() {
 
           <div className="row g-4">
             {classContent.length > 0 ? (
-              classContent.map((item) => (
-                <div key={item.id} className="col-md-6">
-                  <div className="card border-0 shadow-sm rounded-4 h-100 border-start border-4 border-primary">
-                    <div className="card-body p-4">
-                      <div className="d-flex justify-content-between align-items-start mb-3">
-                        <span className={`badge px-3 py-2 ${item.type === 'lesson' ? 'bg-info text-white' : 'bg-warning text-dark'}`}>
-                          {item.type.toUpperCase()}
-                        </span>
-                        {user.role === "professor" && (
-                          <button 
-                            className="btn btn-sm btn-outline-danger border-0 rounded-circle" 
-                            onClick={() => handleDeleteContent(item.id, item.title)}
-                            title="Delete Item"
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </div>
-                      <div className="d-flex justify-content-between align-items-center">
-                        <div>
-                          <h5 className="fw-bold mb-1">{item.title}</h5>
-                          <p className="text-muted small mb-0">
-                            {item.type === 'lesson' ? 'Reading Material' : `${item.questions?.length} Questions`}
-                          </p>
+              classContent.map((item) => {
+                const isCompleted = item.type === 'quiz' && studentAttempts.includes(item.id);
+                
+                return (
+                  <div key={item.id} className="col-md-6">
+                    <div className={`card border-0 shadow-sm rounded-4 h-100 border-start border-4 ${isCompleted ? 'border-success' : 'border-primary'}`}>
+                      <div className="card-body p-4">
+                        <div className="d-flex justify-content-between align-items-start mb-3">
+                          <div className="d-flex gap-2">
+                            <span className={`badge px-3 py-2 ${item.type === 'lesson' ? 'bg-info text-white' : 'bg-warning text-dark'}`}>
+                              {item.type.toUpperCase()}
+                            </span>
+                            {isCompleted && (
+                              <span className="badge bg-success px-3 py-2">
+                                DONE ✅
+                              </span>
+                            )}
+                          </div>
+                          {user.role === "professor" && (
+                            <button 
+                              className="btn btn-sm btn-outline-danger border-0 rounded-circle" 
+                              onClick={() => handleDeleteContent(item.id, item.title)}
+                              title="Delete Item"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
-                        <button 
-                          className="btn btn-primary rounded-pill px-4 shadow-sm" 
-                          onClick={() => navigate(item.type === 'lesson' ? "/viewlesson" : "/takequiz", { state: { contentId: item.id, classId } })}
-                        >
-                          Open
-                        </button>
+                        <div className="d-flex justify-content-between align-items-center">
+                          <div>
+                            <h5 className={`fw-bold mb-1 ${isCompleted ? 'text-success' : ''}`}>{item.title}</h5>
+                            <p className="text-muted small mb-0">
+                              {item.type === 'lesson' ? 'Reading Material' : `${item.questions?.length} Questions`}
+                            </p>
+                          </div>
+                          <button 
+                            className={`btn rounded-pill px-4 shadow-sm ${isCompleted ? 'btn-success' : 'btn-primary'}`} 
+                            onClick={() => navigate(item.type === 'lesson' ? "/viewlesson" : "/takequiz", { state: { contentId: item.id, classId } })}
+                          >
+                            {isCompleted ? "View Result" : "Open"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="text-center py-5 text-muted">No materials posted yet.</div>
             )}
@@ -217,7 +254,13 @@ function ViewClass() {
 
       {/* FOOTER VIEW BASED ON ROLE */}
       {user.role === "professor" ? (
-        <ProfessorStudentTracker students={students} />
+        <ProfessorGradebook 
+          students={students} 
+          scores={allQuizScores} 
+          classContent={classContent} 
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+        />
       ) : (
         <StudentProgressOverview />
       )}
@@ -306,36 +349,88 @@ function ViewClass() {
   );
 }
 
-function ProfessorStudentTracker({ students }) {
+function ProfessorGradebook({ students, scores, classContent, searchTerm, setSearchTerm }) {
+  // Filter only quiz items from content to use as headers
+  const quizHeaders = classContent.filter(item => item.type === 'quiz');
+
+  // Filter students based on search term
+  const filteredStudents = students.filter(s => 
+    s.fullname?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <section className="py-5 bg-light">
       <div className="container">
-        <h4 className="fw-bold mb-4">Student Roster</h4>
-        <div className="table-responsive bg-white p-4 rounded-4 shadow-sm">
-          <table className="table align-middle">
-            <thead>
-              <tr className="text-muted small">
-                <th>NAME</th>
-                <th>EMAIL</th>
-                <th className="text-end">ACTION</th>
-              </tr>
-            </thead>
-            <tbody>
-              {students.length > 0 ? (
-                students.map(s => (
-                  <tr key={s.id}>
-                    <td className="fw-bold">{s.fullname}</td>
-                    <td>{s.email}</td>
-                    <td className="text-end">
-                      <button className="btn btn-sm btn-outline-secondary rounded-pill">View Activity</button>
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
+          <h4 className="fw-bold mb-0">Class Gradebook</h4>
+          
+          {/* SEARCH BAR */}
+          <div className="position-relative" style={{ maxWidth: "350px", width: "100%" }}>
+            <span className="position-absolute top-50 start-0 translate-middle-y ps-3 text-muted">🔍</span>
+            <input 
+              type="text" 
+              className="form-control ps-5 rounded-pill shadow-sm border-0" 
+              placeholder="Search student by name..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+        
+        {/* Scrollable Container for both axis */}
+        <div className="card border-0 shadow-sm rounded-4 overflow-hidden">
+          <div className="table-responsive" style={{ maxHeight: "600px", overflow: "auto" }}>
+            <table className="table table-bordered align-middle mb-0" style={{ minWidth: "900px" }}>
+              <thead className="table-white sticky-top shadow-sm" style={{ zIndex: 10 }}>
+                <tr>
+                  <th className="p-4 bg-white" style={{ minWidth: "250px" }}>Student Name</th>
+                  {quizHeaders.map((quiz) => (
+                    <th key={quiz.id} className="text-center p-3 bg-white" style={{ minWidth: "160px" }}>
+                      <div className="small fw-bold text-primary text-truncate" title={quiz.title}>{quiz.title}</div>
+                      <div className="text-muted x-small" style={{ fontSize: '0.7rem' }}>
+                        {quiz.createdAt?.toDate().toLocaleDateString() || "Date N/A"}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStudents.length > 0 ? (
+                  filteredStudents.map((s) => (
+                    <tr key={s.id}>
+                      <td className="p-4 fw-bold">{s.fullname}</td>
+                      {quizHeaders.map((quiz) => {
+                        // Find the attempt for this student and this specific quiz
+                        const attempt = scores.find(a => a.studentId === s.id && a.quizId === quiz.id);
+                        return (
+                          <td key={quiz.id} className="text-center p-3">
+                            {attempt ? (
+                              <div>
+                                <span className={`badge rounded-pill px-3 py-2 ${attempt.score >= 75 ? 'bg-success' : 'bg-danger'}`}>
+                                  {attempt.score}%
+                                </span>
+                                <div className="text-muted mt-1" style={{ fontSize: '0.65rem' }}>
+                                  {attempt.completedAt?.toDate().toLocaleDateString()}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-muted small">---</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={quizHeaders.length + 1} className="text-center py-5 text-muted">
+                      {students.length === 0 ? "No students enrolled." : "No matching students found."}
                     </td>
                   </tr>
-                ))
-              ) : (
-                <tr><td colSpan="3" className="text-center py-3 text-muted">No students enrolled.</td></tr>
-              )}
-            </tbody>
-          </table>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
