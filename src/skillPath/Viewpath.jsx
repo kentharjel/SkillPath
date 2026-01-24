@@ -22,8 +22,12 @@ function ViewPath() {
   const [path, setPath] = useState(null);
   const [lessons, setLessons] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
-  const [completedLessons, setCompletedLessons] = useState([]); // Tracked as an array of IDs
+  const [completedLessons, setCompletedLessons] = useState([]); 
   const [loading, setLoading] = useState(true);
+
+  // --- STUDENT NAVIGATION ENGINE ---
+  const [viewMode, setViewMode] = useState("list"); 
+  const [activeItem, setActiveItem] = useState(null);
 
   // --- ADMIN FORM STATES ---
   const [lessonForm, setLessonForm] = useState({ title: "", description: "" });
@@ -37,7 +41,7 @@ function ViewPath() {
   const [editQuizTarget, setEditQuizTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  // --- STUDENT STATE ---
+  // --- STUDENT DATA STATE ---
   const [studentAnswers, setStudentAnswers] = useState({});
 
   const getCollectionName = (type) => (type === "quiz" ? "quizzes" : "lessons");
@@ -93,48 +97,42 @@ function ViewPath() {
     if (user && pathId) fetchData();
   }, [pathId, user]);
 
-  // --- ADMIN: QUIZ FORM LOGIC ---
+  // --- ADMIN LOGIC ---
   const addQuestion = () => {
     setQuizForm([...quizForm, { question: "", choices: [{ text: "", isCorrect: true }, { text: "", isCorrect: false }] }]);
   };
-
   const removeQuestion = (qIndex) => {
     setQuizForm(quizForm.filter((_, i) => i !== qIndex));
   };
-
   const addChoice = (qIndex) => {
     const newForm = [...quizForm];
     newForm[qIndex].choices.push({ text: "", isCorrect: false });
     setQuizForm(newForm);
   };
-
   const removeChoice = (qIndex, cIndex) => {
     const newForm = [...quizForm];
     newForm[qIndex].choices = newForm[qIndex].choices.filter((_, i) => i !== cIndex);
     setQuizForm(newForm);
   };
-
   const handleQuizFieldChange = (qIndex, field, value) => {
     const newForm = [...quizForm];
     newForm[qIndex][field] = value;
     setQuizForm(newForm);
   };
-
   const handleChoiceFieldChange = (qIndex, cIndex, value) => {
     const newForm = [...quizForm];
     newForm[qIndex].choices[cIndex].text = value;
     setQuizForm(newForm);
   };
-
   const handleSetCorrect = (qIndex, cIndex) => {
     const newForm = [...quizForm];
     newForm[qIndex].choices.forEach((c, i) => (c.isCorrect = i === cIndex));
     setQuizForm(newForm);
   };
 
-  // --- ACTIONS ---
   const handleAddLesson = async (e) => {
     e.preventDefault();
+    if (!lessonForm.title) return alert("Title required");
     await addDoc(collection(db, "content", pathId, "lessons"), { ...lessonForm, createdBy: user.uid, createdAt: serverTimestamp() });
     setLessonForm({ title: "", description: "" });
     fetchData();
@@ -144,12 +142,13 @@ function ViewPath() {
     if (!selectedLessonForQuiz) return alert("Select a lesson first!");
     await addDoc(collection(db, "content", pathId, "quizzes"), {
       lessonId: selectedLessonForQuiz,
-      title: `Quiz for ${lessons.find(l => l.id === selectedLessonForQuiz)?.title}`,
+      title: `Quiz: ${lessons.find(l => l.id === selectedLessonForQuiz)?.title}`,
       questions: quizForm,
       createdBy: user.uid,
       createdAt: serverTimestamp(),
     });
     setQuizForm([{ question: "", choices: [{ text: "", isCorrect: true }, { text: "", isCorrect: false }] }]);
+    setSelectedLessonForQuiz("");
     fetchData();
   };
 
@@ -178,7 +177,7 @@ function ViewPath() {
     fetchData();
   };
 
-  // --- STUDENT PROGRESS LOGIC (FIXED) ---
+  // --- STUDENT PROGRESS LOGIC ---
   const handleCompleteLesson = async (lessonId) => {
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
     if (!completedLessons.includes(lessonId)) {
@@ -188,14 +187,8 @@ function ViewPath() {
     }
   };
 
-  const handleResetLesson = async (lessonId) => {
-    const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
-    const updated = completedLessons.filter(id => id !== lessonId);
-    await setDoc(userPathRef, { completedLessons: updated, updatedAt: serverTimestamp() }, { merge: true });
-    setCompletedLessons(updated);
-  };
-
   const isQuizPerfect = (quiz) => {
+    if (!quiz) return false;
     const answers = studentAnswers[quiz.id];
     if (!answers || Object.keys(answers).length < quiz.questions.length) return false;
     return quiz.questions.every((q, i) => q.choices[answers[i]]?.isCorrect === true);
@@ -223,50 +216,99 @@ function ViewPath() {
 
   return (
     <div className="bg-light min-vh-100 pb-5">
-      <section className="bg-white border-bottom py-5 mb-4 shadow-sm">
+      {/* INJECTED HOVER STYLE */}
+      <style>
+        {`
+          .choice-card-btn {
+            transition: all 0.2s ease-in-out;
+            border: 2px solid #dee2e6 !important;
+            color: #212529 !important;
+            background-color: #ffffff !important;
+          }
+          .choice-card-btn:hover:not(:disabled) {
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+            transform: translateY(-2px);
+          }
+          /* Keep correct/incorrect colors solid regardless of hover */
+          .choice-card-btn.answer-correct {
+            background-color: #198754 !important;
+            color: white !important;
+            border-color: #198754 !important;
+          }
+          .choice-card-btn.answer-incorrect {
+            background-color: #dc3545 !important;
+            color: white !important;
+            border-color: #dc3545 !important;
+          }
+        `}
+      </style>
+
+      {/* HEADER SECTION */}
+      <section className="bg-white border-bottom py-4 mb-4 shadow-sm">
         <div className="container">
-          <button className="btn btn-link text-decoration-none p-0 mb-3" onClick={() => navigate(-1)}>← Back</button>
-          <div className="d-flex justify-content-between align-items-center">
-            <div>
-              <h1 className="fw-bolder">{path.title}</h1>
-              <p className="text-muted">{path.description}</p>
-            </div>
-            {user?.role === "student" && (
-              <div style={{ width: "200px" }}>
-                <div className="small fw-bold mb-1">PROGRESS: {progressPercent}%</div>
-                <div className="progress" style={{ height: "8px" }}><div className="progress-bar bg-success" style={{ width: `${progressPercent}%` }}></div></div>
+          <button 
+            className="btn btn-sm btn-outline-secondary mb-3 rounded-pill" 
+            onClick={() => viewMode === "list" ? navigate(-1) : setViewMode("list")}
+          >
+            ← {viewMode === "list" ? "Back to Paths" : "Back to Course Menu"}
+          </button>
+          
+          {viewMode === "list" && (
+            <div className="d-flex justify-content-between align-items-end">
+              <div>
+                <span className="badge bg-primary mb-2 text-uppercase">Path Management</span>
+                <h1 className="fw-bolder mb-1">{path.title}</h1>
+                <p className="text-muted mb-0">{path.description}</p>
               </div>
-            )}
-          </div>
+              {user?.role === "student" && (
+                <div className="text-end" style={{ width: "220px" }}>
+                  <div className="d-flex justify-content-between small fw-bold mb-1">
+                    <span>PATH PROGRESS</span>
+                    <span>{progressPercent}%</span>
+                  </div>
+                  <div className="progress" style={{ height: "10px" }}>
+                    <div className="progress-bar bg-success progress-bar-striped progress-bar-animated" style={{ width: `${progressPercent}%` }}></div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
       <div className="container">
         {user?.role === "admin" ? (
+          /* --- ADMIN SECTION --- */
           <div className="row g-4">
             <div className="col-lg-5">
+              {/* Add Lesson Form */}
               <div className="card border-0 shadow-sm p-4 mb-4 rounded-4">
-                <h5 className="fw-bold text-primary mb-3">Add Lesson</h5>
-                <input className="form-control mb-2" placeholder="Title" value={lessonForm.title} onChange={e => setLessonForm({ ...lessonForm, title: e.target.value })} />
-                <textarea className="form-control mb-3" rows="3" placeholder="Description" value={lessonForm.description} onChange={e => setLessonForm({ ...lessonForm, description: e.target.value })} />
-                <button className="btn btn-primary w-100" onClick={handleAddLesson}>Add Lesson</button>
+                <h5 className="fw-bold text-primary mb-3">Add New Lesson</h5>
+                <input className="form-control mb-2" placeholder="Lesson Title" value={lessonForm.title} onChange={e => setLessonForm({ ...lessonForm, title: e.target.value })} />
+                <textarea className="form-control mb-3" rows="3" placeholder="Lesson Content..." value={lessonForm.description} onChange={e => setLessonForm({ ...lessonForm, description: e.target.value })} />
+                <button className="btn btn-primary w-100 fw-bold" onClick={handleAddLesson}>Create Lesson</button>
               </div>
 
+              {/* Create Quiz Form */}
               <div className="card border-0 shadow-sm p-4 rounded-4">
                 <h5 className="fw-bold text-primary mb-3">Create Quiz</h5>
-                <select className="form-select mb-3" value={selectedLessonForQuiz} onChange={e => setSelectedLessonForQuiz(e.target.value)}>
-                  <option value="">Attach to Lesson...</option>
-                  {lessons.map(l => <option key={l.id} value={l.id}>{l.title}</option>)}
+                <label className="small fw-bold text-muted mb-1">SELECT LESSON TO ATTACH</label>
+                <select className="form-select mb-3 border-primary" value={selectedLessonForQuiz} onChange={e => setSelectedLessonForQuiz(e.target.value)}>
+                  <option value="">Choose a lesson...</option>
+                  {lessons.map(l => (
+                    <option key={l.id} value={l.id}>
+                      {l.title} {quizzes.find(q => q.lessonId === l.id) ? "(Already has quiz)" : ""}
+                    </option>
+                  ))}
                 </select>
 
                 {quizForm.map((q, qi) => (
                   <div key={qi} className="border-bottom mb-4 pb-3">
                     <div className="d-flex justify-content-between mb-2">
-                      <label className="fw-bold">Question {qi + 1}</label>
-                      {quizForm.length > 1 && <button className="btn btn-sm btn-outline-danger border-0" onClick={() => removeQuestion(qi)}>Remove</button>}
+                      <label className="fw-bold small">Question {qi + 1}</label>
+                      {quizForm.length > 1 && <button className="btn btn-sm text-danger p-0" onClick={() => removeQuestion(qi)}>Remove</button>}
                     </div>
-                    <input className="form-control mb-2" value={q.question} onChange={e => handleQuizFieldChange(qi, "question", e.target.value)} />
-                    
+                    <input className="form-control mb-2" placeholder="Question text" value={q.question} onChange={e => handleQuizFieldChange(qi, "question", e.target.value)} />
                     {q.choices.map((c, ci) => (
                       <div key={ci} className="input-group input-group-sm mb-1">
                         <div className="input-group-text bg-white border-0">
@@ -279,94 +321,180 @@ function ViewPath() {
                     <button className="btn btn-sm btn-link text-decoration-none p-0 mt-1" onClick={() => addChoice(qi)}>+ Add Choice</button>
                   </div>
                 ))}
-                <button className="btn btn-outline-primary w-100 mb-2" onClick={addQuestion}>+ Add Another Question</button>
+                <button className="btn btn-outline-primary w-100 mb-2 btn-sm" onClick={addQuestion}>+ Add Another Question</button>
                 <button className="btn btn-primary w-100 fw-bold" onClick={handleAddQuiz}>Publish Quiz</button>
               </div>
             </div>
 
             <div className="col-lg-7">
-              {lessons.map((l, idx) => (
-                <div key={l.id} className="card border-0 shadow-sm mb-3 rounded-4">
-                  <div className="card-body p-4">
-                    <div className="d-flex justify-content-between">
-                      <h5 className="fw-bold">{idx + 1}. {l.title}</h5>
-                      <div>
-                        <button className="btn btn-sm btn-light me-1" onClick={() => setEditLessonTarget(l)}>Edit</button>
-                        <button className="btn btn-sm btn-outline-danger" onClick={() => setDeleteTarget({ type: "lesson", id: l.id })}>Delete</button>
-                      </div>
-                    </div>
-                    {quizzes.filter(q => q.lessonId === l.id).map(quiz => (
-                      <div key={quiz.id} className="mt-2 p-2 bg-light rounded d-flex justify-content-between align-items-center">
-                        <span className="small">📝 {quiz.title}</span>
-                        <div>
-                          <button className="btn btn-sm text-primary" onClick={() => setEditQuizTarget(quiz)}>Edit</button>
-                          <button className="btn btn-sm text-danger" onClick={() => setDeleteTarget({ type: "quiz", id: quiz.id })}>Delete</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          /* STUDENT VIEW (FIXED) */
-          <div className="row justify-content-center">
-            <div className="col-lg-8">
-              {lessons.map((lesson, idx) => {
-                const isCompleted = completedLessons.includes(lesson.id);
+              <h5 className="fw-bold mb-3">Curriculum Preview</h5>
+              {lessons.map((l, idx) => {
+                // ATTACH QUIZ TO LESSON FOR ADMIN VIEW
+                const attachedQuiz = quizzes.find(q => q.lessonId === l.id);
 
                 return (
-                  <div key={lesson.id} className="mb-5">
-                    <div className="card border-0 shadow-sm rounded-4 mb-3 overflow-hidden">
-                      <div className={`card-header py-3 border-0 ${isCompleted ? "bg-success text-white" : "bg-primary text-white"}`}>
-                        <h5 className="mb-0 fw-bold">Step {idx + 1}: {lesson.title}</h5>
+                  <div key={l.id} className="card border-0 shadow-sm mb-4 rounded-4 overflow-hidden">
+                    <div className="card-body p-4">
+                      <div className="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                          <span className="badge bg-secondary mb-1">Lesson {idx + 1}</span>
+                          <h5 className="fw-bold mb-0">{l.title}</h5>
+                        </div>
+                        <div className="d-flex gap-2">
+                          <button className="btn btn-sm btn-outline-primary" onClick={() => setEditLessonTarget(l)}>Edit Lesson</button>
+                          <button className="btn btn-sm btn-outline-danger" onClick={() => setDeleteTarget({ type: "lesson", id: l.id })}>Delete</button>
+                        </div>
                       </div>
-                      <div className="card-body p-4">
-                        <p style={{ whiteSpace: "pre-wrap" }}>{lesson.description}</p>
-                        <button 
-                          className={`btn rounded-pill px-4 fw-bold ${isCompleted ? "btn-outline-secondary" : "btn-primary"}`} 
-                          onClick={() => isCompleted ? handleResetLesson(lesson.id) : handleCompleteLesson(lesson.id)}
-                        >
-                          {isCompleted ? "Read Again" : "Mark as Finished"}
-                        </button>
+                      <p className="text-muted small text-truncate" style={{ maxWidth: "400px" }}>{l.description}</p>
+                      
+                      {/* Attached Quiz Section inside Admin Lesson Card */}
+                      <div className="mt-3 pt-3 border-top">
+                        {attachedQuiz ? (
+                          <div className="bg-light p-3 rounded-3 d-flex justify-content-between align-items-center">
+                            <div>
+                              <span className="badge bg-info text-dark mb-1">Attached Quiz</span>
+                              <div className="fw-bold">{attachedQuiz.questions.length} Questions</div>
+                            </div>
+                            <div className="d-flex gap-2">
+                              <button className="btn btn-sm btn-light border" onClick={() => setEditQuizTarget(attachedQuiz)}>Edit Quiz</button>
+                              <button className="btn btn-sm btn-outline-danger" onClick={() => setDeleteTarget({ type: "quiz", id: attachedQuiz.id })}>Delete Quiz</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-muted small italic p-2 border border-dashed rounded-3">
+                            No quiz attached to this lesson. Use the form on the left to add one.
+                          </div>
+                        )}
                       </div>
                     </div>
-
-                    {quizzes.filter(q => q.lessonId === lesson.id).map(quiz => {
-                      const perfect = isQuizPerfect(quiz);
-                      const answers = studentAnswers[quiz.id] || {};
-                      const finished = Object.keys(answers).length === quiz.questions.length;
-
-                      return (
-                        <div key={quiz.id} className="card border-0 shadow-sm rounded-4 p-4 mb-4 ms-md-5 border-start border-4 border-primary">
-                          <div className="d-flex justify-content-between align-items-center mb-3">
-                            <h6 className="fw-bold text-primary m-0">Challenge: {quiz.title}</h6>
-                            {perfect ? <span className="badge bg-success">100% Locked</span> : finished && <button className="btn btn-sm btn-warning" onClick={() => handleRedoQuiz(quiz.id)}>Retake</button>}
-                          </div>
-                          {quiz.questions.map((q, qi) => (
-                            <div key={qi} className="mb-3">
-                              <p className="small fw-bold mb-2">{qi + 1}. {q.question}</p>
-                              <div className="d-flex flex-wrap gap-2">
-                                {q.choices.map((c, ci) => {
-                                  const selected = answers[qi] === ci;
-                                  let style = "btn-outline-light text-dark border";
-                                  if (selected) style = c.isCorrect ? "btn-success" : "btn-danger text-white";
-                                  return (
-                                    <button key={ci} className={`btn btn-sm rounded-pill px-3 ${style}`} disabled={answers[qi] !== undefined || perfect} onClick={() => handleAnswer(quiz.id, qi, ci, quiz)}>
-                                      {c.text}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })}
                   </div>
                 );
               })}
+            </div>
+          </div>
+        ) : (
+          /* --- STUDENT VIEW ENGINE --- */
+          <div className="row justify-content-center">
+            <div className="col-lg-10">
+              
+              {viewMode === "list" && (
+                <div>
+                  <h4 className="fw-bold mb-4 text-secondary">Course Curriculum</h4>
+                  {lessons.map((lesson, idx) => {
+                    const isCompleted = completedLessons.includes(lesson.id);
+                    const lessonQuiz = quizzes.find(q => q.lessonId === lesson.id);
+                    const quizDone = isQuizPerfect(lessonQuiz);
+
+                    return (
+                      <div key={lesson.id} className="card border-0 shadow-sm rounded-4 mb-3 p-2 border-start border-5 border-primary">
+                        <div className="card-body d-flex justify-content-between align-items-center">
+                          <div>
+                            <span className="text-primary small fw-bold text-uppercase">Module {idx + 1}</span>
+                            <h4 className="fw-bold mb-1">{lesson.title}</h4>
+                            <div className="d-flex gap-3">
+                              <span className={`small ${isCompleted ? 'text-success fw-bold' : 'text-muted'}`}>
+                                {isCompleted ? "✓ Lesson Read" : "○ Not Read"}
+                              </span>
+                              {lessonQuiz && (
+                                <span className={`small ${quizDone ? 'text-success fw-bold' : 'text-muted'}`}>
+                                  {quizDone ? "✓ Quiz Passed" : "○ Quiz Pending"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="d-flex gap-2">
+                            <button 
+                              className="btn btn-primary rounded-pill px-4 fw-bold shadow-sm"
+                              onClick={() => { setActiveItem(lesson); setViewMode("lesson"); }}
+                            >
+                              Open Lesson
+                            </button>
+                            {lessonQuiz && (
+                              <button 
+                                className={`btn rounded-pill px-4 fw-bold ${quizDone ? 'btn-outline-success' : 'btn-outline-warning'}`}
+                                onClick={() => { setActiveItem(lessonQuiz); setViewMode("quiz"); }}
+                              >
+                                {quizDone ? "Review Quiz" : "Take Quiz"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {viewMode === "lesson" && activeItem && (
+                <div className="card border-0 shadow rounded-4 p-5 bg-white">
+                  <div className="d-flex justify-content-between align-items-start mb-4">
+                    <div>
+                      <span className="badge bg-primary px-3 py-2 rounded-pill mb-2">READING MODE</span>
+                      <h1 className="fw-bolder">{activeItem.title}</h1>
+                    </div>
+                    {completedLessons.includes(activeItem.id) && <h5 className="text-success fw-bold mt-2">✓ Completed</h5>}
+                  </div>
+                  <hr className="mb-4" />
+                  <div className="content-body mb-5" style={{ whiteSpace: "pre-wrap", fontSize: "1.15rem", lineHeight: "1.8", color: "#333" }}>
+                    {activeItem.description}
+                  </div>
+                  <div className="d-flex justify-content-between border-top pt-4">
+                    <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Back to Curriculum</button>
+                    <button 
+                      className={`btn rounded-pill px-5 fw-bold ${completedLessons.includes(activeItem.id) ? 'btn-success' : 'btn-primary shadow'}`}
+                      onClick={() => handleCompleteLesson(activeItem.id)}
+                    >
+                      {completedLessons.includes(activeItem.id) ? "✓ Mark as Read" : "Finish Lesson"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {viewMode === "quiz" && activeItem && (
+                <div className="card border-0 shadow rounded-4 p-5 bg-white">
+                  <div className="d-flex justify-content-between align-items-center mb-4">
+                    <h2 className="fw-bold mb-0 text-primary">{activeItem.title}</h2>
+                    {isQuizPerfect(activeItem) && <span className="badge bg-success p-2 px-3 rounded-pill shadow-sm">100% Correct</span>}
+                  </div>
+                  <p className="text-muted mb-4">Select the correct answer for each question.</p>
+                  <hr className="mb-5" />
+                  {activeItem.questions.map((q, qi) => {
+                    const answers = studentAnswers[activeItem.id] || {};
+                    return (
+                      <div key={qi} className="mb-5 p-4 border rounded-4 bg-light shadow-sm">
+                        <h5 className="fw-bold mb-4">{qi + 1}. {q.question}</h5>
+                        <div className="row g-3">
+                          {q.choices.map((c, ci) => {
+                            const selected = answers[qi] === ci;
+                            let extraClass = "";
+                            if (selected) {
+                                extraClass = c.isCorrect ? "answer-correct" : "answer-incorrect";
+                            }
+                            
+                            return (
+                              <div key={ci} className="col-md-6">
+                                <button 
+                                  className={`btn w-100 text-start p-3 rounded-3 fw-bold choice-card-btn ${extraClass}`}
+                                  disabled={answers[qi] !== undefined || isQuizPerfect(activeItem)}
+                                  onClick={() => handleAnswer(activeItem.id, qi, ci, activeItem)}
+                                >
+                                  {c.text}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="d-flex gap-3 mt-4">
+                    <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Exit Quiz</button>
+                    {Object.keys(studentAnswers[activeItem.id] || {}).length === activeItem.questions.length && (
+                        <button className="btn btn-warning rounded-pill px-4 fw-bold shadow-sm" onClick={() => handleRedoQuiz(activeItem.id)}>Reset & Retake</button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -376,7 +504,7 @@ function ViewPath() {
       {editLessonTarget && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="modal-dialog modal-dialog-centered">
-            <div className="modal-content border-0 rounded-4">
+            <div className="modal-content border-0 rounded-4 shadow">
               <div className="modal-body p-4">
                 <h5 className="fw-bold mb-3">Edit Lesson</h5>
                 <input className="form-control mb-2" value={editLessonTarget.title} onChange={e => setEditLessonTarget({ ...editLessonTarget, title: e.target.value })} />
@@ -395,14 +523,12 @@ function ViewPath() {
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.6)", overflowY: "auto" }}>
           <div className="modal-dialog modal-lg modal-dialog-centered">
             <div className="modal-content border-0 rounded-4 shadow">
-                <div className="modal-header border-0 p-4 pb-0">
-                    <h5 className="fw-bold">Edit Quiz</h5>
-                </div>
+                <div className="modal-header border-0 p-4 pb-0"><h5 className="fw-bold">Edit Quiz Details</h5></div>
                 <div className="modal-body p-4">
-                    <input className="form-control mb-4 fw-bold" value={editQuizTarget.title} onChange={e => setEditQuizTarget({...editQuizTarget, title: e.target.value})} />
+                    <input className="form-control mb-4 fw-bold border-primary" value={editQuizTarget.title} onChange={e => setEditQuizTarget({...editQuizTarget, title: e.target.value})} />
                     {editQuizTarget.questions.map((q, qi) => (
-                        <div key={qi} className="bg-light p-3 rounded-3 mb-3">
-                            <input className="form-control mb-2" value={q.question} onChange={e => {
+                        <div key={qi} className="bg-light p-3 rounded-3 mb-3 border">
+                            <input className="form-control mb-2 fw-bold" value={q.question} onChange={e => {
                                 const qs = [...editQuizTarget.questions];
                                 qs[qi].question = e.target.value;
                                 setEditQuizTarget({...editQuizTarget, questions: qs});
@@ -428,7 +554,7 @@ function ViewPath() {
                 </div>
                 <div className="modal-footer border-0 p-4 pt-0">
                     <button className="btn btn-light" onClick={() => setEditQuizTarget(null)}>Cancel</button>
-                    <button className="btn btn-primary" onClick={handleUpdateQuiz}>Save Changes</button>
+                    <button className="btn btn-primary px-4 fw-bold" onClick={handleUpdateQuiz}>Save Quiz Updates</button>
                 </div>
             </div>
           </div>
@@ -438,8 +564,9 @@ function ViewPath() {
       {deleteTarget && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="modal-dialog modal-dialog-centered modal-sm">
-            <div className="modal-content border-0 rounded-4 p-4 text-center">
-              <h6 className="fw-bold mb-3">Delete this {deleteTarget.type}?</h6>
+            <div className="modal-content border-0 rounded-4 p-4 text-center shadow">
+              <h6 className="fw-bold mb-3 text-danger">Are you sure?</h6>
+              <p className="small text-muted mb-3">Deleting this {deleteTarget.type} cannot be undone.</p>
               <div className="d-flex gap-2">
                 <button className="btn btn-danger w-100" onClick={confirmDelete}>Delete</button>
                 <button className="btn btn-light w-100" onClick={() => setDeleteTarget(null)}>Cancel</button>
