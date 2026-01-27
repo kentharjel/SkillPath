@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 
 function Navbar() {
   const navigate = useNavigate();
+  const location = useLocation(); // Listen for route changes
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const collapseRef = useRef(null); // Reference to the navbar div
 
   // Modal State
   const [modal, setModal] = useState({
@@ -18,28 +20,37 @@ function Navbar() {
     onConfirm: null,
   });
 
+  // Effect to collapse navbar on route change
+  useEffect(() => {
+    const navbarCollapse = collapseRef.current;
+    if (navbarCollapse && navbarCollapse.classList.contains("show")) {
+      // Use Bootstrap's native method if available, otherwise manual toggle
+      const bsCollapse = window.bootstrap?.Collapse.getInstance(navbarCollapse);
+      if (bsCollapse) {
+        bsCollapse.hide();
+      } else {
+        // Fallback: Manually remove the 'show' class
+        navbarCollapse.classList.remove("show");
+      }
+    }
+  }, [location]);
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       if (currentUser) {
         try {
-          // 1. Try to fetch custom data from Firestore
           const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-
           if (userDoc.exists()) {
-            // Data found in Firestore (for both Email and Google users who have profiles)
             setUser({ uid: currentUser.uid, ...userDoc.data() });
           } else {
-            // 2. Fallback for Google Users (or users without a Firestore doc yet)
-            // currentUser.displayName comes directly from the Google Account
             setUser({
               uid: currentUser.uid,
               fullname: currentUser.displayName || "User", 
-              role: "student", // Default role
+              role: "student", 
             });
           }
         } catch (err) {
           console.error("Failed to fetch user info:", err);
-          // If Firestore fails, still try to use the Auth name
           setUser({
             uid: currentUser.uid,
             fullname: currentUser.displayName || "User",
@@ -49,7 +60,6 @@ function Navbar() {
       } else {
         setUser(null);
       }
-
       setLoading(false);
     });
 
@@ -88,7 +98,6 @@ function Navbar() {
     }
   };
 
-  // ✅ MENU BY ROLE
   const getMenuItems = () => {
     if (!user) {
       return [
@@ -99,7 +108,6 @@ function Navbar() {
         { label: "About Us", to: "/about" },
       ];
     }
-
     if (user.role === "student") {
       return [
         { label: "Learning Paths", to: "/learningpaths" },
@@ -108,21 +116,18 @@ function Navbar() {
         { label: "Achievements", to: "/achievements" },
       ];
     }
-
     if (user.role === "professor") {
       return [
         { label: "Classes", to: "/classes" },
         { label: "About Us", to: "/about" },
       ];
     }
-
     if (user.role === "admin") {
       return [
         { label: "Admin Dashboard", to: "/admin" },
         { label: "Learning Paths", to: "/learningpaths" },
       ];
     }
-
     return [];
   };
 
@@ -151,7 +156,11 @@ function Navbar() {
             <span className="navbar-toggler-icon"></span>
           </button>
 
-          <div className="collapse navbar-collapse" id="skillpathNavbar">
+          <div 
+            className="collapse navbar-collapse" 
+            id="skillpathNavbar"
+            ref={collapseRef} /* Attached Ref Here */
+          >
             <ul className="navbar-nav ms-auto align-items-lg-center gap-lg-4">
               {menuItems.map((item) => (
                 <li key={item.label} className="nav-item">
@@ -183,7 +192,6 @@ function Navbar() {
               {!loading && user && (
                 <>
                   <li className="nav-item">
-                    {/* Displays name from Firestore or Google Profile */}
                     <span className="nav-link fw-bold text-primary">
                       {user.fullname}
                     </span>
