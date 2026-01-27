@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import {
@@ -18,6 +18,8 @@ function ViewPath() {
   const location = useLocation();
   const pathId = location.state?.pathId;
 
+  const quizTopRef = useRef(null);
+
   const [user, setUser] = useState(null);
   const [path, setPath] = useState(null);
   const [lessons, setLessons] = useState([]);
@@ -27,6 +29,8 @@ function ViewPath() {
 
   // --- HEART SYSTEM STATE ---
   const [hearts, setHearts] = useState(5);
+  const [showHeartModal, setShowHeartModal] = useState(false);
+  const [nextHeartTime, setNextHeartTime] = useState("");
 
   // --- STUDENT NAVIGATION ENGINE ---
   const [viewMode, setViewMode] = useState("list"); 
@@ -64,6 +68,40 @@ function ViewPath() {
     return () => unsubscribe();
   }, [navigate]);
 
+  // HEART REGEN TIMER LOGIC
+  useEffect(() => {
+    if (hearts >= 5) {
+        setNextHeartTime("");
+        return;
+    }
+
+    const interval = setInterval(async () => {
+        const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
+        const userPathDoc = await getDoc(userPathRef);
+        
+        if (userPathDoc.exists()) {
+            const data = userPathDoc.data();
+            const lastLoss = data.lastHeartLoss?.toDate();
+            if (lastLoss) {
+                const now = new Date();
+                const nextHeartDate = new Date(lastLoss.getTime() + (3 * 60 * 60 * 1000));
+                const diff = nextHeartDate - now;
+
+                if (diff <= 0) {
+                    fetchData(); // Refresh if heart is earned
+                } else {
+                    const h = Math.floor(diff / (1000 * 60 * 60));
+                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const s = Math.floor((diff % (1000 * 60)) / 1000);
+                    setNextHeartTime(`${h}h ${m}m ${s}s`);
+                }
+            }
+        }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [hearts, user, pathId]);
+
   const fetchData = async () => {
     if (!pathId) return navigate("/learningpaths");
     try {
@@ -95,7 +133,6 @@ function ViewPath() {
           let currentHearts = data.hearts !== undefined ? data.hearts : 5;
           const lastLoss = data.lastHeartLoss?.toDate();
           
-          // HEART REGENERATION LOGIC (1 heart every 3 hours)
           if (currentHearts < 5 && lastLoss) {
             const now = new Date();
             const msPassed = now - lastLoss;
@@ -159,7 +196,6 @@ function ViewPath() {
     newForm[qIndex].choices.forEach((c, i) => (c.isCorrect = i === cIndex));
     setQuizForm(newForm);
   };
-
   const handleAddLesson = async (e) => {
     e.preventDefault();
     if (!lessonForm.title) return alert("Title required");
@@ -167,7 +203,6 @@ function ViewPath() {
     setLessonForm({ title: "", description: "" });
     fetchData();
   };
-
   const handleAddQuiz = async () => {
     if (!selectedLessonForQuiz) return alert("Select a lesson first!");
     await addDoc(collection(db, "content", pathId, "quizzes"), {
@@ -181,13 +216,11 @@ function ViewPath() {
     setSelectedLessonForQuiz("");
     fetchData();
   };
-
   const handleUpdateLesson = async () => {
     await updateDoc(doc(db, "content", pathId, "lessons", editLessonTarget.id), { title: editLessonTarget.title, description: editLessonTarget.description });
     setEditLessonTarget(null);
     fetchData();
   };
-
   const handleUpdateQuiz = async () => {
     try {
         await updateDoc(doc(db, "content", pathId, "quizzes", editQuizTarget.id), { 
@@ -200,7 +233,6 @@ function ViewPath() {
         console.error("Update Quiz Error:", error);
     }
   };
-
   const confirmDelete = async () => {
     await deleteDoc(doc(db, "content", pathId, getCollectionName(deleteTarget.type), deleteTarget.id));
     setDeleteTarget(null);
@@ -234,41 +266,37 @@ function ViewPath() {
 
   const handleRedoQuiz = async (quizId) => {
     const currentQuiz = quizzes.find(q => q.id === quizId);
-    
     if (isQuizPerfect(currentQuiz)) {
         alert("You have already perfected this quiz! No need to retake.");
         return;
     }
-
     if (hearts <= 0) {
         alert("You have no hearts left! Please wait for them to regenerate.");
         return;
     }
 
+    if (quizTopRef.current) {
+        quizTopRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
-    
-    // UI Update immediately
     const newHeartCount = hearts - 1;
     const newAnswers = { ...studentAnswers };
     delete newAnswers[quizId];
-    
     setHearts(newHeartCount);
     setStudentAnswers(newAnswers);
-
     const updateData = { 
         completedQuizzes: newAnswers,
         hearts: newHeartCount
     };
-    
     if (hearts === 5) {
         updateData.lastHeartLoss = new Date();
     }
-
     try {
         await updateDoc(userPathRef, updateData);
     } catch (error) {
         console.error("Redo error:", error);
-        fetchData(); // Reset on error
+        fetchData();
     }
   };
 
@@ -300,8 +328,8 @@ function ViewPath() {
             color: white !important;
             border-color: #dc3545 !important;
           }
-          .heart-icon { color: #ff4b2b; margin-right: 2px; }
-          .heart-empty { color: #dee2e6; margin-right: 2px; }
+          .heart-main { color: #ff4b2b; font-size: 1.2rem; cursor: pointer; }
+          .heart-container:hover { background-color: #fff5f5 !important; }
         `}
       </style>
 
@@ -317,17 +345,16 @@ function ViewPath() {
             </button>
             
             {user?.role === "student" && (
-                <div className="bg-light px-3 py-1 rounded-pill border d-flex align-items-center shadow-sm">
-                    <span className="small fw-bold text-muted me-2">HEARTS:</span>
-                    <span className="fw-bold me-2" style={{ color: hearts > 0 ? '#ff4b2b' : '#6c757d' }}>
-                        {hearts}/5
+                <div 
+                  className="bg-white px-3 py-1 rounded-pill border d-flex align-items-center shadow-sm heart-container" 
+                  style={{cursor: 'pointer'}}
+                  onClick={() => setShowHeartModal(true)}
+                >
+                    <span className="heart-main me-2">❤️</span>
+                    <span className="fw-bold text-dark" style={{fontSize: '1.1rem'}}>
+                        {hearts}
                     </span>
-                    <div className="d-flex me-2">
-                        {[...Array(5)].map((_, i) => (
-                            <span key={i} className={i < hearts ? 'heart-icon' : 'heart-empty'}>❤️</span>
-                        ))}
-                    </div>
-                    {hearts < 5 && <span className="badge bg-secondary" style={{fontSize: '10px'}}>Regenerating...</span>}
+                    {hearts < 5 && <span className="ms-2 badge bg-light text-muted border" style={{fontSize: '10px'}}>Regenerating...</span>}
                 </div>
             )}
           </div>
@@ -520,7 +547,7 @@ function ViewPath() {
               )}
 
               {viewMode === "quiz" && activeItem && (
-                <div className="card border-0 shadow rounded-4 p-5 bg-white">
+                <div className="card border-0 shadow rounded-4 p-5 bg-white" ref={quizTopRef}>
                   <div className="d-flex justify-content-between align-items-center mb-4">
                     <h2 className="fw-bold mb-0 text-primary">{activeItem.title}</h2>
                     {isQuizPerfect(activeItem) && <span className="badge bg-success p-2 px-3 rounded-pill shadow-sm">100% Correct</span>}
@@ -557,8 +584,6 @@ function ViewPath() {
                   })}
                   <div className="d-flex gap-3 mt-4">
                     <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Exit Quiz</button>
-                    
-                    {/* HEART LOGIC: Show Retake if quiz isn't perfect and all questions were answered */}
                     {Object.keys(studentAnswers[activeItem.id] || {}).length === activeItem.questions.length && !isQuizPerfect(activeItem) && (
                         <button 
                             className="btn btn-warning rounded-pill px-4 fw-bold shadow-sm" 
@@ -576,7 +601,40 @@ function ViewPath() {
         )}
       </div>
 
-      {/* --- MODALS --- */}
+      {/* --- HEART STATUS MODAL (STUDENT ONLY) --- */}
+      {showHeartModal && user?.role === "student" && (
+        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+            <div className="modal-dialog modal-dialog-centered">
+                <div className="modal-content border-0 rounded-4 shadow p-4 text-center">
+                    <div className="mb-3">
+                        <span style={{fontSize: '4rem'}}>❤️</span>
+                    </div>
+                    {hearts >= 5 ? (
+                        <>
+                            <h3 className="fw-bold">Hearts are Full!</h3>
+                            <p className="text-muted">You are in peak condition. Go ahead and tackle those quizzes!</p>
+                        </>
+                    ) : (
+                        <>
+                            <h3 className="fw-bold">Next Heart In</h3>
+                            <h2 className="text-primary fw-bolder mb-3">{nextHeartTime || "Calculating..."}</h2>
+                            <p className="text-muted">Hearts are used to retry quizzes you didn't perfect. One heart regenerates every 3 hours.</p>
+                        </>
+                    )}
+                    
+                    <div className="bg-light p-3 rounded-4 mb-4 border border-primary">
+                        <h6 className="fw-bold mb-1 text-primary">✨ Unlimited Hearts</h6>
+                        <p className="small mb-2">Never wait for hearts again with a Pro subscription.</p>
+                        <button className="btn btn-primary w-100 rounded-pill fw-bold" onClick={() => alert("Subscription feature coming soon!")}>Subscribe Now</button>
+                    </div>
+
+                    <button className="btn btn-light w-100 rounded-pill fw-bold" onClick={() => setShowHeartModal(false)}>Close</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* --- ADMIN MODALS --- */}
       {editLessonTarget && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="modal-dialog modal-dialog-centered">
