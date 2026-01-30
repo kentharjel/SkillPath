@@ -2,16 +2,16 @@ import { useEffect, useState, useRef } from "react";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useNavigate, Link, useLocation } from "react-router-dom";
+import { useNavigate, Link, NavLink, useLocation } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion"; // Install via: npm install framer-motion
 
 function Navbar() {
   const navigate = useNavigate();
-  const location = useLocation(); // Listen for route changes
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const collapseRef = useRef(null); // Reference to the navbar div
+  const collapseRef = useRef(null);
 
-  // Modal State
   const [modal, setModal] = useState({
     show: false,
     title: "",
@@ -20,16 +20,13 @@ function Navbar() {
     onConfirm: null,
   });
 
-  // Effect to collapse navbar on route change
   useEffect(() => {
     const navbarCollapse = collapseRef.current;
     if (navbarCollapse && navbarCollapse.classList.contains("show")) {
-      // Use Bootstrap's native method if available, otherwise manual toggle
       const bsCollapse = window.bootstrap?.Collapse.getInstance(navbarCollapse);
       if (bsCollapse) {
         bsCollapse.hide();
       } else {
-        // Fallback: Manually remove the 'show' class
         navbarCollapse.classList.remove("show");
       }
     }
@@ -43,26 +40,16 @@ function Navbar() {
           if (userDoc.exists()) {
             setUser({ uid: currentUser.uid, ...userDoc.data() });
           } else {
-            setUser({
-              uid: currentUser.uid,
-              fullname: currentUser.displayName || "User", 
-              role: "student", 
-            });
+            setUser({ uid: currentUser.uid, fullname: currentUser.displayName || "User", role: "student" });
           }
         } catch (err) {
-          console.error("Failed to fetch user info:", err);
-          setUser({
-            uid: currentUser.uid,
-            fullname: currentUser.displayName || "User",
-            role: "student",
-          });
+          setUser({ uid: currentUser.uid, fullname: currentUser.displayName || "User", role: "student" });
         }
       } else {
         setUser(null);
       }
       setLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
@@ -80,7 +67,6 @@ function Navbar() {
     try {
       await signOut(auth);
       setUser(null);
-      
       setModal({
         show: true,
         title: "Logged Out",
@@ -88,9 +74,8 @@ function Navbar() {
         isConfirm: false,
         onConfirm: null,
       });
-
       setTimeout(() => {
-        setModal(prev => ({ ...prev, show: false }));
+        setModal((prev) => ({ ...prev, show: false }));
         navigate("/");
       }, 2000);
     } catch (err) {
@@ -99,158 +84,161 @@ function Navbar() {
   };
 
   const getMenuItems = () => {
-    if (!user) {
-      return [
-        { label: "Learning Paths", to: "/learningpaths" },
-        { label: "Classes", to: "/classes" },
-        { label: "Progress", to: "/progress" },
-        { label: "Achievements", to: "/achievements" },
-        { label: "About Us", to: "/about" },
-      ];
-    }
-    if (user.role === "student") {
-      return [
-        { label: "Learning Paths", to: "/learningpaths" },
-        { label: "Classes", to: "/classes" },
-        { label: "Progress", to: "/progress" },
-        { label: "Achievements", to: "/achievements" },
-      ];
-    }
-    if (user.role === "professor") {
-      return [
-        { label: "Classes", to: "/classes" },
-        { label: "About Us", to: "/about" },
-      ];
-    }
-    if (user.role === "admin") {
-      return [
-        { label: "Admin Dashboard", to: "/admin" },
-        { label: "Learning Paths", to: "/learningpaths" },
-      ];
-    }
+    if (!user) return [
+      { label: "Learning Paths", to: "/learningpaths" },
+      { label: "Classes", to: "/classes" },
+      { label: "Progress", to: "/progress" },
+      { label: "Achievements", to: "/achievements" },
+      { label: "About Us", to: "/about" },
+    ];
+    if (user.role === "student") return [
+      { label: "Learning Paths", to: "/learningpaths" },
+      { label: "Classes", to: "/classes" },
+      { label: "Progress", to: "/progress" },
+      { label: "Achievements", to: "/achievements" },
+    ];
+    if (user.role === "professor") return [
+      { label: "Classes", to: "/classes" },
+      { label: "About Us", to: "/about" },
+    ];
+    if (user.role === "admin") return [
+      { label: "Admin Dashboard", to: "/admin" },
+      { label: "Learning Paths", to: "/learningpaths" },
+    ];
     return [];
   };
 
-  const menuItems = loading
-    ? [
-        { label: "Learning Paths", to: "/learningpaths" },
-        { label: "Classes", to: "/classes" },
-        { label: "About Us", to: "/about" },
-      ]
-    : getMenuItems();
+  const menuItems = loading ? [] : getMenuItems();
 
   return (
     <>
+      <style>
+        {`
+          .nav-link-custom {
+            position: relative;
+            text-decoration: none;
+            padding: 0.5rem 0;
+            transition: color 0.3s ease;
+          }
+          .active-underline {
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #0d6efd;
+            border-radius: 2px;
+          }
+        `}
+      </style>
+
       <nav className="navbar navbar-expand-lg navbar-light bg-white shadow-sm sticky-top">
         <div className="container">
           <Link className="navbar-brand fw-bold fs-4 text-dark" to="/">
             Skill<span className="text-primary">Path</span>
           </Link>
 
-          <button
-            className="navbar-toggler"
-            type="button"
-            data-bs-toggle="collapse"
-            data-bs-target="#skillpathNavbar"
-          >
+          <button className="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#skillpathNavbar">
             <span className="navbar-toggler-icon"></span>
           </button>
 
-          <div 
-            className="collapse navbar-collapse" 
-            id="skillpathNavbar"
-            ref={collapseRef} /* Attached Ref Here */
-          >
+          <div className="collapse navbar-collapse" id="skillpathNavbar" ref={collapseRef}>
             <ul className="navbar-nav ms-auto align-items-lg-center gap-lg-4">
-              {menuItems.map((item) => (
-                <li key={item.label} className="nav-item">
-                  <Link className="nav-link fw-medium text-dark" to={item.to}>
-                    {item.label}
-                  </Link>
-                </li>
+              {menuItems.map((item, index) => (
+                <motion.li 
+                  key={item.label} 
+                  className="nav-item"
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <NavLink
+                    className={({ isActive }) => `nav-link nav-link-custom fw-medium ${isActive ? "text-primary" : "text-dark"}`}
+                    to={item.to}
+                  >
+                    {({ isActive }) => (
+                      <motion.div whileHover={{ scale: 1.05 }} style={{ position: 'relative' }}>
+                        {item.label}
+                        {isActive && (
+                          <motion.div 
+                            layoutId="nav-underline"
+                            className="active-underline"
+                          />
+                        )}
+                      </motion.div>
+                    )}
+                  </NavLink>
+                </motion.li>
               ))}
 
               <li className="nav-item d-none d-lg-block">
-                <span className="border-start mx-3"></span>
+                <span className="border-start mx-2" style={{ height: '20px', display: 'inline-block' }}></span>
               </li>
 
-              {!loading && !user && (
-                <>
-                  <li className="nav-item">
-                    <Link className="btn btn-outline-primary btn-sm px-3" to="/login">
-                      Login
-                    </Link>
-                  </li>
-                  <li className="nav-item">
-                    <Link className="btn btn-primary btn-sm px-3 shadow-sm" to="/getstarted">
-                      Get Started
-                    </Link>
-                  </li>
-                </>
-              )}
-
-              {!loading && user && (
-                <>
-                  <li className="nav-item">
-                    <span className="nav-link fw-bold text-primary">
-                      {user.fullname}
-                    </span>
-                  </li>
-                  <li className="nav-item">
-                    <button
-                      className="btn btn-outline-danger btn-sm px-3"
-                      onClick={handleLogoutClick}
-                    >
-                      Logout
-                    </button>
-                  </li>
-                </>
-              )}
+              <AnimatePresence mode="wait">
+                {!loading && !user ? (
+                  <motion.div 
+                    key="logged-out-actions"
+                    className="d-flex gap-2"
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  >
+                    <Link className="btn btn-outline-primary btn-sm px-3 rounded-pill" to="/login">Login</Link>
+                    <Link className="btn btn-primary btn-sm px-3 shadow-sm rounded-pill" to="/getstarted">Get Started</Link>
+                  </motion.div>
+                ) : !loading && user ? (
+                  <motion.div 
+                    key="logged-in-actions"
+                    className="d-flex align-items-center gap-3"
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  >
+                    <span className="fw-bold text-primary small">{user.fullname}</span>
+                    <button className="btn btn-outline-danger btn-sm px-3 rounded-pill" onClick={handleLogoutClick}>Logout</button>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </ul>
           </div>
         </div>
       </nav>
 
-      {/* CUSTOM MODAL COMPONENT */}
-      {modal.show && (
-        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 2000 }}>
-          <div className="modal-dialog modal-dialog-centered">
-            <div className="modal-content border-0 shadow-lg rounded-4">
-              <div className="modal-header border-0 pb-0 pt-4 px-4">
-                <h5 className="fw-bold text-dark">{modal.title}</h5>
-              </div>
-              <div className="modal-body p-4">
-                <p className="text-muted mb-0">{modal.message}</p>
-              </div>
-              <div className="modal-footer border-0 pt-0 pb-4 px-4">
-                {modal.isConfirm ? (
-                  <>
-                    <button 
-                      className="btn btn-light px-4 rounded-pill fw-bold" 
-                      onClick={() => setModal({ ...modal, show: false })}
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      className="btn btn-danger px-4 rounded-pill fw-bold" 
-                      onClick={modal.onConfirm}
-                    >
-                      Logout
-                    </button>
-                  </>
-                ) : (
-                  <button 
-                    className="btn btn-primary px-5 rounded-pill fw-bold w-100" 
-                    onClick={() => setModal({ ...modal, show: false })}
-                  >
-                    Okay
-                  </button>
-                )}
-              </div>
+      {/* ANIMATED MODAL */}
+      <AnimatePresence>
+        {modal.show && (
+          <motion.div 
+            className="modal d-block" 
+            style={{ backgroundColor: "rgba(0,0,0,0.4)", zIndex: 2000 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="modal-dialog modal-dialog-centered">
+              <motion.div 
+                className="modal-content border-0 shadow-lg rounded-4"
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+              >
+                <div className="modal-header border-0 pb-0 pt-4 px-4">
+                  <h5 className="fw-bold">{modal.title}</h5>
+                </div>
+                <div className="modal-body p-4">
+                  <p className="text-muted mb-0">{modal.message}</p>
+                </div>
+                <div className="modal-footer border-0 pt-0 pb-4 px-4">
+                  {modal.isConfirm ? (
+                    <>
+                      <button className="btn btn-light px-4 rounded-pill fw-bold" onClick={() => setModal({ ...modal, show: false })}>Cancel</button>
+                      <button className="btn btn-danger px-4 rounded-pill fw-bold" onClick={modal.onConfirm}>Logout</button>
+                    </>
+                  ) : (
+                    <button className="btn btn-primary px-5 rounded-pill fw-bold w-100" onClick={() => setModal({ ...modal, show: false })}>Okay</button>
+                  )}
+                </div>
+              </motion.div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

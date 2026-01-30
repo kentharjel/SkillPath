@@ -18,10 +18,12 @@ function TakeQuiz() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState({});
   const [isFinished, setIsFinished] = useState(false);
-  const [score, setScore] = useState(0);
+  const [score, setScore] = useState(0); 
 
   // Admin Edit State
+  const [editTitle, setEditTitle] = useState("");
   const [editQuestions, setEditQuestions] = useState([]);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
@@ -32,14 +34,13 @@ function TakeQuiz() {
       setUser(userData);
 
       if (classId && contentId) {
-        // 1. Fetch Quiz Data
         const quizSnap = await getDoc(doc(db, `classes/${classId}/content`, contentId));
         if (quizSnap.exists()) {
           const data = quizSnap.data();
           setQuiz(data);
+          setEditTitle(data.title || "");
           setEditQuestions(data.questions || []);
 
-          // 2. No Retake Logic: Check for previous attempt and get the score
           if (userData.role === "student") {
             const attemptsRef = collection(db, `classes/${classId}/attempts`);
             const q = query(attemptsRef, 
@@ -49,7 +50,6 @@ function TakeQuiz() {
             const attemptSnaps = await getDocs(q);
             
             if (!attemptSnaps.empty) {
-              // Get the score from the first found attempt
               const attemptData = attemptSnaps.docs[0].data();
               setPreviousScore(attemptData.score);
               setAlreadyAttempted(true);
@@ -66,10 +66,11 @@ function TakeQuiz() {
   const handleUpdateQuiz = async () => {
     try {
       await updateDoc(doc(db, `classes/${classId}/content`, contentId), {
+        title: editTitle,
         questions: editQuestions
       });
-      setQuiz({ ...quiz, questions: editQuestions });
-      alert("Quiz updated successfully!");
+      setQuiz({ ...quiz, title: editTitle, questions: editQuestions });
+      setShowSuccessModal(true); // Show custom modal instead of alert
     } catch (err) {
       console.error(err);
     }
@@ -78,6 +79,18 @@ function TakeQuiz() {
   const updateQuestionText = (index, val) => {
     const updated = [...editQuestions];
     updated[index].questionText = val;
+    setEditQuestions(updated);
+  };
+
+  const updateOptionText = (qIdx, oIdx, val) => {
+    const updated = [...editQuestions];
+    updated[qIdx].options[oIdx] = val;
+    setEditQuestions(updated);
+  };
+
+  const updateCorrectAnswer = (qIdx, oIdx) => {
+    const updated = [...editQuestions];
+    updated[qIdx].correctAnswer = oIdx;
     setEditQuestions(updated);
   };
 
@@ -96,17 +109,16 @@ function TakeQuiz() {
       if (selectedAnswers[index] === q.correctAnswer) totalCorrect++;
     });
 
-    const finalScore = Math.round((totalCorrect / quiz.questions.length) * 100);
-    setScore(finalScore);
+    const percentageScore = Math.round((totalCorrect / quiz.questions.length) * 100);
+    setScore(totalCorrect); 
     setIsFinished(true);
 
-    // Save attempt to Firestore
     await addDoc(collection(db, `classes/${classId}/attempts`), {
       studentId: user.uid,
       studentName: user.fullname || "Student",
       quizId: contentId,
       quizTitle: quiz.title,
-      score: finalScore,
+      score: percentageScore,
       completedAt: serverTimestamp(),
     });
   };
@@ -118,34 +130,87 @@ function TakeQuiz() {
     return (
       <div className="container py-5">
         <div className="d-flex justify-content-between align-items-center mb-4">
-          <h2 className="fw-bold">Edit Quiz: {quiz?.title}</h2>
-          <button className="btn btn-outline-secondary" onClick={() => navigate(-1)}>Back</button>
-        </div>
-        {editQuestions.map((q, qIdx) => (
-          <div key={qIdx} className="card p-4 mb-3 border-0 shadow-sm rounded-4">
+          <div>
+            <label className="small fw-bold text-muted">QUIZ TITLE</label>
             <input 
-              className="form-control fw-bold mb-3" 
-              value={q.questionText} 
-              onChange={(e) => updateQuestionText(qIdx, e.target.value)}
+              className="form-control form-control-lg fw-bold border-0 bg-light" 
+              value={editTitle} 
+              onChange={(e) => setEditTitle(e.target.value)}
             />
-            <div className="row g-2">
+          </div>
+          <button className="btn btn-outline-secondary rounded-pill" onClick={() => navigate(-1)}>Back</button>
+        </div>
+
+        {editQuestions.map((q, qIdx) => (
+          <div key={qIdx} className="card p-4 mb-4 border-0 shadow-sm rounded-4">
+            <div className="mb-3">
+              <label className="small fw-bold text-primary">QUESTION {qIdx + 1}</label>
+              <input 
+                className="form-control fw-bold" 
+                value={q.questionText} 
+                onChange={(e) => updateQuestionText(qIdx, e.target.value)}
+              />
+            </div>
+            
+            <div className="row g-3">
               {q.options.map((opt, oIdx) => (
                 <div key={oIdx} className="col-md-6">
-                  <div className={`p-2 border rounded ${q.correctAnswer === oIdx ? 'bg-success-subtle border-success' : ''}`}>
-                    {opt} {q.correctAnswer === oIdx && "✅"}
+                  <div className={`input-group rounded-3 overflow-hidden border ${q.correctAnswer === oIdx ? 'border-success shadow-sm' : ''}`}>
+                    <div className="input-group-text bg-white border-0">
+                      <input 
+                        type="radio" 
+                        className="form-check-input" 
+                        name={`correct-${qIdx}`} 
+                        checked={q.correctAnswer === oIdx} 
+                        onChange={() => updateCorrectAnswer(qIdx, oIdx)}
+                      />
+                    </div>
+                    <input 
+                      className={`form-control border-0 ${q.correctAnswer === oIdx ? 'bg-success-subtle fw-bold' : ''}`} 
+                      value={opt} 
+                      onChange={(e) => updateOptionText(qIdx, oIdx, e.target.value)}
+                    />
+                    {q.correctAnswer === oIdx && <span className="input-group-text bg-success-subtle border-0">✅</span>}
                   </div>
                 </div>
               ))}
             </div>
           </div>
         ))}
-        <button className="btn btn-primary w-100 py-3 rounded-pill fw-bold" onClick={handleUpdateQuiz}>Save Quiz Changes</button>
+
+        <div className="sticky-bottom bg-white py-3 border-top mt-5">
+          <button className="btn btn-primary w-100 py-3 rounded-pill fw-bold shadow" onClick={handleUpdateQuiz}>
+            Save All Quiz Changes
+          </button>
+        </div>
+
+        {/* SUCCESS MODAL FOR PROFESSOR */}
+        {showSuccessModal && (
+          <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+            <div className="modal-dialog modal-dialog-centered">
+              <div className="modal-content border-0 shadow-lg rounded-4 text-center p-5">
+                <div className="display-1 text-success mb-3">🎉</div>
+                <h3 className="fw-bold">Updated!</h3>
+                <p className="text-muted">Quiz content and answers have been saved successfully.</p>
+                <button 
+                  className="btn btn-primary rounded-pill px-5 mt-3 fw-bold" 
+                  onClick={() => setShowSuccessModal(false)}
+                >
+                  Great!
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
-  // --- RENDER: STUDENT VIEW (LOCKED - SHOW PREVIOUS SCORE) ---
+  // --- RENDER: STUDENT VIEW (LOCKED) ---
   if (alreadyAttempted && !isFinished) {
+    const totalQuestions = quiz?.questions?.length || 0;
+    const rawPreviousScore = Math.round((previousScore / 100) * totalQuestions);
+
     return (
       <div className="container py-5 text-center">
         <div className="card border-0 shadow-lg p-5 rounded-4 mx-auto" style={{ maxWidth: "500px" }}>
@@ -155,7 +220,7 @@ function TakeQuiz() {
             You have already submitted your answers for <strong>{quiz?.title}</strong>. 
             Your recorded score is:
           </p>
-          <div className="display-4 fw-bold text-primary mb-3">{previousScore}%</div>
+          <div className="display-4 fw-bold text-primary mb-3">{rawPreviousScore} / {totalQuestions}</div>
           <p className="small text-muted mb-4">Retakes are not allowed for this assessment.</p>
           <button className="btn btn-primary rounded-pill px-5" onClick={() => navigate(-1)}>Return to Class</button>
         </div>
@@ -163,13 +228,14 @@ function TakeQuiz() {
     );
   }
 
-  // --- RENDER: STUDENT VIEW (RESULT SCREEN FOR NEW ATTEMPT) ---
+  // --- RENDER: STUDENT VIEW (RESULT SCREEN) ---
   if (isFinished) {
+    const totalQuestions = quiz?.questions?.length || 0;
     return (
       <div className="container py-5 text-center">
         <div className="card border-0 shadow-lg p-5 rounded-4 mx-auto" style={{ maxWidth: "500px" }}>
-          <div className="display-4 mb-3">{score === 100 ? "🌟 Perfect!" : "✅ Submitted"}</div>
-          <h2 className="fw-bold">{score}%</h2>
+          <div className="display-4 mb-3">{score === totalQuestions ? "🌟 Perfect!" : "✅ Submitted"}</div>
+          <h2 className="fw-bold">{score} / {totalQuestions}</h2>
           <p className="text-muted">Your score has been successfully recorded.</p>
           <button className="btn btn-primary mt-4 px-5 rounded-pill" onClick={() => navigate(-1)}>Finish</button>
         </div>

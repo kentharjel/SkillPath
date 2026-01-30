@@ -24,7 +24,7 @@ function ViewPath() {
   const [path, setPath] = useState(null);
   const [lessons, setLessons] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
-  const [completedLessons, setCompletedLessons] = useState([]); 
+  const [completedLessons, setCompletedLessons] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // --- HEART SYSTEM STATE ---
@@ -33,11 +33,12 @@ function ViewPath() {
   const [nextHeartTime, setNextHeartTime] = useState("");
 
   // --- STUDENT NAVIGATION ENGINE ---
-  const [viewMode, setViewMode] = useState("list"); 
+  const [viewMode, setViewMode] = useState("list");
   const [activeItem, setActiveItem] = useState(null);
 
   // --- ADMIN FORM STATES ---
-  const [lessonForm, setLessonForm] = useState({ title: "", description: "" });
+  const [lessonForm, setLessonForm] = useState({ title: "", description: "", links: [] });
+  const [linkInput, setLinkInput] = useState({ title: "", url: "" });
   const [selectedLessonForQuiz, setSelectedLessonForQuiz] = useState("");
   const [quizForm, setQuizForm] = useState([
     { question: "", choices: [{ text: "", isCorrect: true }, { text: "", isCorrect: false }] }
@@ -52,6 +53,23 @@ function ViewPath() {
   const [studentAnswers, setStudentAnswers] = useState({});
 
   const getCollectionName = (type) => (type === "quiz" ? "quizzes" : "lessons");
+
+  // --- UPDATED LOGO HELPER ---
+  // This uses Google S2 to fetch the official favicon of the domain
+  const getLinkIcon = (url) => {
+    try {
+      const domain = new URL(url).hostname;
+      return (
+        <img 
+          src={`https://www.google.com/s2/favicons?sz=64&domain=${domain}`} 
+          alt="icon" 
+          style={{ width: '20px', height: '20px', objectFit: 'contain', borderRadius: '4px' }} 
+        />
+      );
+    } catch (e) {
+      return <span>🔗</span>;
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
@@ -68,35 +86,34 @@ function ViewPath() {
     return () => unsubscribe();
   }, [navigate]);
 
-  // HEART REGEN TIMER LOGIC
   useEffect(() => {
-    if (hearts >= 5) {
-        setNextHeartTime("");
-        return;
+    if (hearts >= 5 || !user || !pathId) {
+      setNextHeartTime("");
+      return;
     }
 
     const interval = setInterval(async () => {
-        const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
-        const userPathDoc = await getDoc(userPathRef);
-        
-        if (userPathDoc.exists()) {
-            const data = userPathDoc.data();
-            const lastLoss = data.lastHeartLoss?.toDate();
-            if (lastLoss) {
-                const now = new Date();
-                const nextHeartDate = new Date(lastLoss.getTime() + (3 * 60 * 60 * 1000));
-                const diff = nextHeartDate - now;
+      const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
+      const userPathDoc = await getDoc(userPathRef);
 
-                if (diff <= 0) {
-                    fetchData(); // Refresh if heart is earned
-                } else {
-                    const h = Math.floor(diff / (1000 * 60 * 60));
-                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                    const s = Math.floor((diff % (1000 * 60)) / 1000);
-                    setNextHeartTime(`${h}h ${m}m ${s}s`);
-                }
-            }
+      if (userPathDoc.exists()) {
+        const data = userPathDoc.data();
+        const lastLoss = data.lastHeartLoss?.toDate();
+        if (lastLoss) {
+          const now = new Date();
+          const nextHeartDate = new Date(lastLoss.getTime() + (3 * 60 * 60 * 1000));
+          const diff = nextHeartDate - now;
+
+          if (diff <= 0) {
+            fetchData();
+          } else {
+            const h = Math.floor(diff / (1000 * 60 * 60));
+            const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const s = Math.floor((diff % (1000 * 60)) / 1000);
+            setNextHeartTime(`${h}h ${m}m ${s}s`);
+          }
         }
+      }
     }, 1000);
 
     return () => clearInterval(interval);
@@ -124,27 +141,27 @@ function ViewPath() {
       if (user?.uid) {
         const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
         const userPathDoc = await getDoc(userPathRef);
-        
+
         if (userPathDoc.exists()) {
           const data = userPathDoc.data();
           setCompletedLessons(data.completedLessons || []);
           setStudentAnswers(data.completedQuizzes || {});
-          
+
           let currentHearts = data.hearts !== undefined ? data.hearts : 5;
           const lastLoss = data.lastHeartLoss?.toDate();
-          
+
           if (currentHearts < 5 && lastLoss) {
             const now = new Date();
             const msPassed = now - lastLoss;
             const hoursPassed = Math.floor(msPassed / (1000 * 60 * 60));
             const heartsToRestore = Math.floor(hoursPassed / 3);
-            
+
             if (heartsToRestore > 0) {
-                currentHearts = Math.min(5, currentHearts + heartsToRestore);
-                await updateDoc(userPathRef, { 
-                    hearts: currentHearts,
-                    lastHeartLoss: currentHearts === 5 ? null : new Date(lastLoss.getTime() + (heartsToRestore * 3 * 60 * 60 * 1000))
-                });
+              currentHearts = Math.min(5, currentHearts + heartsToRestore);
+              await updateDoc(userPathRef, {
+                hearts: currentHearts,
+                lastHeartLoss: currentHearts === 5 ? null : new Date(lastLoss.getTime() + (heartsToRestore * 3 * 60 * 60 * 1000))
+              });
             }
           }
           setHearts(currentHearts);
@@ -164,7 +181,16 @@ function ViewPath() {
     if (user && pathId) fetchData();
   }, [pathId, user]);
 
-  // --- ADMIN LOGIC ---
+  const addLinkToForm = () => {
+    if (!linkInput.title || !linkInput.url) return alert("Fill link title and URL");
+    setLessonForm({ ...lessonForm, links: [...(lessonForm.links || []), linkInput] });
+    setLinkInput({ title: "", url: "" });
+  };
+
+  const removeLinkFromForm = (idx) => {
+    setLessonForm({ ...lessonForm, links: lessonForm.links.filter((_, i) => i !== idx) });
+  };
+
   const addQuestion = () => {
     setQuizForm([...quizForm, { question: "", choices: [{ text: "", isCorrect: true }, { text: "", isCorrect: false }] }]);
   };
@@ -199,8 +225,13 @@ function ViewPath() {
   const handleAddLesson = async (e) => {
     e.preventDefault();
     if (!lessonForm.title) return alert("Title required");
-    await addDoc(collection(db, "content", pathId, "lessons"), { ...lessonForm, createdBy: user.uid, createdAt: serverTimestamp() });
-    setLessonForm({ title: "", description: "" });
+    await addDoc(collection(db, "content", pathId, "lessons"), {
+      ...lessonForm,
+      links: lessonForm.links || [],
+      createdBy: user.uid,
+      createdAt: serverTimestamp()
+    });
+    setLessonForm({ title: "", description: "", links: [] });
     fetchData();
   };
   const handleAddQuiz = async () => {
@@ -217,20 +248,24 @@ function ViewPath() {
     fetchData();
   };
   const handleUpdateLesson = async () => {
-    await updateDoc(doc(db, "content", pathId, "lessons", editLessonTarget.id), { title: editLessonTarget.title, description: editLessonTarget.description });
+    await updateDoc(doc(db, "content", pathId, "lessons", editLessonTarget.id), {
+      title: editLessonTarget.title,
+      description: editLessonTarget.description,
+      links: editLessonTarget.links || []
+    });
     setEditLessonTarget(null);
     fetchData();
   };
   const handleUpdateQuiz = async () => {
     try {
-        await updateDoc(doc(db, "content", pathId, "quizzes", editQuizTarget.id), { 
-            title: editQuizTarget.title, 
-            questions: editQuizTarget.questions 
-        });
-        setEditQuizTarget(null);
-        fetchData();
+      await updateDoc(doc(db, "content", pathId, "quizzes", editQuizTarget.id), {
+        title: editQuizTarget.title,
+        questions: editQuizTarget.questions
+      });
+      setEditQuizTarget(null);
+      fetchData();
     } catch (error) {
-        console.error("Update Quiz Error:", error);
+      console.error("Update Quiz Error:", error);
     }
   };
   const confirmDelete = async () => {
@@ -239,7 +274,6 @@ function ViewPath() {
     fetchData();
   };
 
-  // --- STUDENT PROGRESS LOGIC ---
   const handleCompleteLesson = async (lessonId) => {
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
     if (!completedLessons.includes(lessonId)) {
@@ -267,16 +301,16 @@ function ViewPath() {
   const handleRedoQuiz = async (quizId) => {
     const currentQuiz = quizzes.find(q => q.id === quizId);
     if (isQuizPerfect(currentQuiz)) {
-        alert("You have already perfected this quiz! No need to retake.");
-        return;
+      alert("You have already perfected this quiz! No need to retake.");
+      return;
     }
     if (hearts <= 0) {
-        alert("You have no hearts left! Please wait for them to regenerate.");
-        return;
+      alert("You have no hearts left! Please wait for them to regenerate.");
+      return;
     }
 
     if (quizTopRef.current) {
-        quizTopRef.current.scrollIntoView({ behavior: 'smooth' });
+      quizTopRef.current.scrollIntoView({ behavior: 'smooth' });
     }
 
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
@@ -285,18 +319,18 @@ function ViewPath() {
     delete newAnswers[quizId];
     setHearts(newHeartCount);
     setStudentAnswers(newAnswers);
-    const updateData = { 
-        completedQuizzes: newAnswers,
-        hearts: newHeartCount
+    const updateData = {
+      completedQuizzes: newAnswers,
+      hearts: newHeartCount
     };
     if (hearts === 5) {
-        updateData.lastHeartLoss = new Date();
+      updateData.lastHeartLoss = new Date();
     }
     try {
-        await updateDoc(userPathRef, updateData);
+      await updateDoc(userPathRef, updateData);
     } catch (error) {
-        console.error("Redo error:", error);
-        fetchData();
+      console.error("Redo error:", error);
+      fetchData();
     }
   };
 
@@ -330,6 +364,21 @@ function ViewPath() {
           }
           .heart-main { color: #ff4b2b; font-size: 1.2rem; cursor: pointer; }
           .heart-container:hover { background-color: #fff5f5 !important; }
+          .resource-link {
+            transition: all 0.2s;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #eee;
+            margin-bottom: 5px;
+          }
+          .resource-link:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+          }
         `}
       </style>
 
@@ -337,28 +386,28 @@ function ViewPath() {
       <section className="bg-white border-bottom py-4 mb-4 shadow-sm">
         <div className="container">
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <button 
-                className="btn btn-sm btn-outline-secondary rounded-pill" 
-                onClick={() => viewMode === "list" ? navigate(-1) : setViewMode("list")}
+            <button
+              className="btn btn-sm btn-outline-secondary rounded-pill"
+              onClick={() => viewMode === "list" ? navigate(-1) : setViewMode("list")}
             >
-                ← {viewMode === "list" ? "Back to Paths" : "Back to Course Menu"}
+              ← {viewMode === "list" ? "Back to Paths" : "Back to Course Menu"}
             </button>
-            
+
             {user?.role === "student" && (
-                <div 
-                  className="bg-white px-3 py-1 rounded-pill border d-flex align-items-center shadow-sm heart-container" 
-                  style={{cursor: 'pointer'}}
-                  onClick={() => setShowHeartModal(true)}
-                >
-                    <span className="heart-main me-2">❤️</span>
-                    <span className="fw-bold text-dark" style={{fontSize: '1.1rem'}}>
-                        {hearts}
-                    </span>
-                    {hearts < 5 && <span className="ms-2 badge bg-light text-muted border" style={{fontSize: '10px'}}>Regenerating...</span>}
-                </div>
+              <div
+                className="bg-white px-3 py-1 rounded-pill border d-flex align-items-center shadow-sm heart-container"
+                style={{ cursor: 'pointer' }}
+                onClick={() => setShowHeartModal(true)}
+              >
+                <span className="heart-main me-2">❤️</span>
+                <span className="fw-bold text-dark" style={{ fontSize: '1.1rem' }}>
+                  {hearts}
+                </span>
+                {hearts < 5 && <span className="ms-2 badge bg-light text-muted border" style={{ fontSize: '10px' }}>Regenerating...</span>}
+              </div>
             )}
           </div>
-          
+
           {viewMode === "list" && (
             <div className="d-flex justify-content-between align-items-end">
               <div>
@@ -391,6 +440,25 @@ function ViewPath() {
                 <h5 className="fw-bold text-primary mb-3">Add New Lesson</h5>
                 <input className="form-control mb-2" placeholder="Lesson Title" value={lessonForm.title} onChange={e => setLessonForm({ ...lessonForm, title: e.target.value })} />
                 <textarea className="form-control mb-3" rows="3" placeholder="Lesson Content..." value={lessonForm.description} onChange={e => setLessonForm({ ...lessonForm, description: e.target.value })} />
+
+                {/* ATTACH LINKS FEATURE */}
+                <div className="bg-light p-3 rounded-3 mb-3 border">
+                  <label className="small fw-bold mb-2">ATTACH RESOURCES (Optional)</label>
+                  <div className="input-group input-group-sm mb-2">
+                    <input className="form-control" placeholder="Link Title (e.g. Tutorial)" value={linkInput.title} onChange={e => setLinkInput({ ...linkInput, title: e.target.value })} />
+                    <input className="form-control" placeholder="URL (Youtube, Github, etc)" value={linkInput.url} onChange={e => setLinkInput({ ...linkInput, url: e.target.value })} />
+                    <button className="btn btn-dark" onClick={addLinkToForm}>Add</button>
+                  </div>
+                  <div className="d-flex flex-wrap gap-2">
+                    {lessonForm.links?.map((link, i) => (
+                      <span key={i} className="badge bg-white text-dark border p-2 d-flex align-items-center gap-2">
+                        {getLinkIcon(link.url)} {link.title}
+                        <button className="btn-close ms-2" style={{ fontSize: '8px' }} onClick={() => removeLinkFromForm(i)}></button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
                 <button className="btn btn-primary w-100 fw-bold" onClick={handleAddLesson}>Create Lesson</button>
               </div>
 
@@ -447,6 +515,18 @@ function ViewPath() {
                         </div>
                       </div>
                       <p className="text-muted small text-truncate" style={{ maxWidth: "400px" }}>{l.description}</p>
+
+                      {/* PREVIEW ATTACHED LINKS */}
+                      {l.links?.length > 0 && (
+                        <div className="mb-3">
+                          {l.links.map((link, li) => (
+                            <span key={li} className="badge bg-light text-muted border me-1 small d-inline-flex align-items-center gap-1">
+                              {getLinkIcon(link.url)} {link.title}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
                       <div className="mt-3 pt-3 border-top">
                         {attachedQuiz ? (
                           <div className="bg-light p-3 rounded-3 d-flex justify-content-between align-items-center">
@@ -499,14 +579,14 @@ function ViewPath() {
                             </div>
                           </div>
                           <div className="d-flex gap-2">
-                            <button 
+                            <button
                               className="btn btn-primary rounded-pill px-4 fw-bold shadow-sm"
                               onClick={() => { setActiveItem(lesson); setViewMode("lesson"); }}
                             >
                               Open Lesson
                             </button>
                             {lessonQuiz && (
-                              <button 
+                              <button
                                 className={`btn rounded-pill px-4 fw-bold ${quizDone ? 'btn-outline-success' : 'btn-outline-warning'}`}
                                 onClick={() => { setActiveItem(lessonQuiz); setViewMode("quiz"); }}
                               >
@@ -531,12 +611,33 @@ function ViewPath() {
                     {completedLessons.includes(activeItem.id) && <h5 className="text-success fw-bold mt-2">✓ Completed</h5>}
                   </div>
                   <hr className="mb-4" />
-                  <div className="content-body mb-5" style={{ whiteSpace: "pre-wrap", fontSize: "1.15rem", lineHeight: "1.8", color: "#333" }}>
+                  <div className="content-body mb-4" style={{ whiteSpace: "pre-wrap", fontSize: "1.15rem", lineHeight: "1.8", color: "#333" }}>
                     {activeItem.description}
                   </div>
+
+                  {/* STUDENT VIEW - LESSON LINKS */}
+                  {activeItem.links?.length > 0 && (
+                    <div className="mb-5">
+                      <h6 className="fw-bold text-muted mb-3">HELPFUL RESOURCES</h6>
+                      <div className="row g-2">
+                        {activeItem.links.map((link, li) => (
+                          <div key={li} className="col-md-6">
+                            <a href={link.url} target="_blank" rel="noopener noreferrer" className="resource-link">
+                              <span className="me-2 fs-5 d-flex align-items-center">{getLinkIcon(link.url)}</span>
+                              <div>
+                                <div className="fw-bold text-dark small">{link.title}</div>
+                                <div className="text-muted" style={{ fontSize: '10px' }}>{new URL(link.url).hostname}</div>
+                              </div>
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="d-flex justify-content-between border-top pt-4">
                     <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Back to Curriculum</button>
-                    <button 
+                    <button
                       className={`btn rounded-pill px-5 fw-bold ${completedLessons.includes(activeItem.id) ? 'btn-success' : 'btn-primary shadow'}`}
                       onClick={() => handleCompleteLesson(activeItem.id)}
                     >
@@ -564,11 +665,11 @@ function ViewPath() {
                             const selected = answers[qi] === ci;
                             let extraClass = "";
                             if (selected) {
-                                extraClass = c.isCorrect ? "answer-correct" : "answer-incorrect";
+                              extraClass = c.isCorrect ? "answer-correct" : "answer-incorrect";
                             }
                             return (
                               <div key={ci} className="col-md-6">
-                                <button 
+                                <button
                                   className={`btn w-100 text-start p-3 rounded-3 fw-bold choice-card-btn ${extraClass}`}
                                   disabled={answers[qi] !== undefined || isQuizPerfect(activeItem)}
                                   onClick={() => handleAnswer(activeItem.id, qi, ci, activeItem)}
@@ -585,13 +686,13 @@ function ViewPath() {
                   <div className="d-flex gap-3 mt-4">
                     <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Exit Quiz</button>
                     {Object.keys(studentAnswers[activeItem.id] || {}).length === activeItem.questions.length && !isQuizPerfect(activeItem) && (
-                        <button 
-                            className="btn btn-warning rounded-pill px-4 fw-bold shadow-sm" 
-                            onClick={() => handleRedoQuiz(activeItem.id)}
-                            disabled={hearts <= 0}
-                        >
-                            {hearts > 0 ? `Reset & Retake (-1 ❤️)` : "Out of Hearts"}
-                        </button>
+                      <button
+                        className="btn btn-warning rounded-pill px-4 fw-bold shadow-sm"
+                        onClick={() => handleRedoQuiz(activeItem.id)}
+                        disabled={hearts <= 0}
+                      >
+                        {hearts > 0 ? `Reset & Retake (-1 ❤️)` : "Out of Hearts"}
+                      </button>
                     )}
                   </div>
                 </div>
@@ -604,33 +705,33 @@ function ViewPath() {
       {/* --- HEART STATUS MODAL (STUDENT ONLY) --- */}
       {showHeartModal && user?.role === "student" && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
-            <div className="modal-dialog modal-dialog-centered">
-                <div className="modal-content border-0 rounded-4 shadow p-4 text-center">
-                    <div className="mb-3">
-                        <span style={{fontSize: '4rem'}}>❤️</span>
-                    </div>
-                    {hearts >= 5 ? (
-                        <>
-                            <h3 className="fw-bold">Hearts are Full!</h3>
-                            <p className="text-muted">You are in peak condition. Go ahead and tackle those quizzes!</p>
-                        </>
-                    ) : (
-                        <>
-                            <h3 className="fw-bold">Next Heart In</h3>
-                            <h2 className="text-primary fw-bolder mb-3">{nextHeartTime || "Calculating..."}</h2>
-                            <p className="text-muted">Hearts are used to retry quizzes you didn't perfect. One heart regenerates every 3 hours.</p>
-                        </>
-                    )}
-                    
-                    <div className="bg-light p-3 rounded-4 mb-4 border border-primary">
-                        <h6 className="fw-bold mb-1 text-primary">✨ Unlimited Hearts</h6>
-                        <p className="small mb-2">Never wait for hearts again with a Pro subscription.</p>
-                        <button className="btn btn-primary w-100 rounded-pill fw-bold" onClick={() => alert("Subscription feature coming soon!")}>Subscribe Now</button>
-                    </div>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 rounded-4 shadow p-4 text-center">
+              <div className="mb-3">
+                <span style={{ fontSize: '4rem' }}>❤️</span>
+              </div>
+              {hearts >= 5 ? (
+                <>
+                  <h3 className="fw-bold">Hearts are Full!</h3>
+                  <p className="text-muted">You are in peak condition. Go ahead and tackle those quizzes!</p>
+                </>
+              ) : (
+                <>
+                  <h3 className="fw-bold">Next Heart In</h3>
+                  <h2 className="text-primary fw-bolder mb-3">{nextHeartTime || "Calculating..."}</h2>
+                  <p className="text-muted">Hearts are used to retry quizzes you didn't perfect. One heart regenerates every 3 hours.</p>
+                </>
+              )}
 
-                    <button className="btn btn-light w-100 rounded-pill fw-bold" onClick={() => setShowHeartModal(false)}>Close</button>
-                </div>
+              <div className="bg-light p-3 rounded-4 mb-4 border border-primary">
+                <h6 className="fw-bold mb-1 text-primary">✨ Unlimited Hearts</h6>
+                <p className="small mb-2">Never wait for hearts again with a Pro subscription.</p>
+                <button className="btn btn-primary w-100 rounded-pill fw-bold" onClick={() => alert("Subscription feature coming soon!")}>Subscribe Now</button>
+              </div>
+
+              <button className="btn btn-light w-100 rounded-pill fw-bold" onClick={() => setShowHeartModal(false)}>Close</button>
             </div>
+          </div>
         </div>
       )}
 
@@ -643,6 +744,29 @@ function ViewPath() {
                 <h5 className="fw-bold mb-3">Edit Lesson</h5>
                 <input className="form-control mb-2" value={editLessonTarget.title} onChange={e => setEditLessonTarget({ ...editLessonTarget, title: e.target.value })} />
                 <textarea className="form-control mb-3" rows="5" value={editLessonTarget.description} onChange={e => setEditLessonTarget({ ...editLessonTarget, description: e.target.value })} />
+
+                {/* EDIT LINKS IN MODAL */}
+                <div className="bg-light p-3 rounded-3 mb-3 border">
+                  <label className="small fw-bold mb-2">UPDATE LINKS</label>
+                  <div className="input-group input-group-sm mb-2">
+                    <input className="form-control" placeholder="Title" value={linkInput.title} onChange={e => setLinkInput({ ...linkInput, title: e.target.value })} />
+                    <input className="form-control" placeholder="URL" value={linkInput.url} onChange={e => setLinkInput({ ...linkInput, url: e.target.value })} />
+                    <button className="btn btn-dark" onClick={() => {
+                      if (!linkInput.title || !linkInput.url) return;
+                      setEditLessonTarget({ ...editLessonTarget, links: [...(editLessonTarget.links || []), linkInput] });
+                      setLinkInput({ title: "", url: "" });
+                    }}>Add</button>
+                  </div>
+                  <div className="d-flex flex-wrap gap-2">
+                    {editLessonTarget.links?.map((link, i) => (
+                      <span key={i} className="badge bg-white text-dark border p-2 d-flex align-items-center gap-2">
+                        {getLinkIcon(link.url)} {link.title}
+                        <button className="btn-close ms-2" style={{ fontSize: '8px' }} onClick={() => setEditLessonTarget({ ...editLessonTarget, links: editLessonTarget.links.filter((_, idx) => idx !== i) })}></button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="d-flex gap-2">
                   <button className="btn btn-primary w-100" onClick={handleUpdateLesson}>Update</button>
                   <button className="btn btn-light w-100" onClick={() => setEditLessonTarget(null)}>Cancel</button>
@@ -657,39 +781,39 @@ function ViewPath() {
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.6)", overflowY: "auto" }}>
           <div className="modal-dialog modal-lg modal-dialog-centered">
             <div className="modal-content border-0 rounded-4 shadow">
-                <div className="modal-header border-0 p-4 pb-0"><h5 className="fw-bold">Edit Quiz Details</h5></div>
-                <div className="modal-body p-4">
-                    <input className="form-control mb-4 fw-bold border-primary" value={editQuizTarget.title} onChange={e => setEditQuizTarget({...editQuizTarget, title: e.target.value})} />
-                    {editQuizTarget.questions.map((q, qi) => (
-                        <div key={qi} className="bg-light p-3 rounded-3 mb-3 border">
-                            <input className="form-control mb-2 fw-bold" value={q.question} onChange={e => {
-                                const qs = [...editQuizTarget.questions];
-                                qs[qi].question = e.target.value;
-                                setEditQuizTarget({...editQuizTarget, questions: qs});
-                            }} />
-                            {q.choices.map((c, ci) => (
-                                <div key={ci} className="input-group mb-1">
-                                    <div className="input-group-text border-0 bg-transparent">
-                                        <input type="radio" checked={c.isCorrect} onChange={() => {
-                                            const qs = [...editQuizTarget.questions];
-                                            qs[qi].choices.forEach((choice, idx) => choice.isCorrect = idx === ci);
-                                            setEditQuizTarget({...editQuizTarget, questions: qs});
-                                        }} />
-                                    </div>
-                                    <input className="form-control" value={c.text} onChange={e => {
-                                        const qs = [...editQuizTarget.questions];
-                                        qs[qi].choices[ci].text = e.target.value;
-                                        setEditQuizTarget({...editQuizTarget, questions: qs});
-                                    }} />
-                                </div>
-                            ))}
+              <div className="modal-header border-0 p-4 pb-0"><h5 className="fw-bold">Edit Quiz Details</h5></div>
+              <div className="modal-body p-4">
+                <input className="form-control mb-4 fw-bold border-primary" value={editQuizTarget.title} onChange={e => setEditQuizTarget({ ...editQuizTarget, title: e.target.value })} />
+                {editQuizTarget.questions.map((q, qi) => (
+                  <div key={qi} className="bg-light p-3 rounded-3 mb-3 border">
+                    <input className="form-control mb-2 fw-bold" value={q.question} onChange={e => {
+                      const qs = [...editQuizTarget.questions];
+                      qs[qi].question = e.target.value;
+                      setEditQuizTarget({ ...editQuizTarget, questions: qs });
+                    }} />
+                    {q.choices.map((c, ci) => (
+                      <div key={ci} className="input-group mb-1">
+                        <div className="input-group-text border-0 bg-transparent">
+                          <input type="radio" checked={c.isCorrect} onChange={() => {
+                            const qs = [...editQuizTarget.questions];
+                            qs[qi].choices.forEach((choice, idx) => choice.isCorrect = idx === ci);
+                            setEditQuizTarget({ ...editQuizTarget, questions: qs });
+                          }} />
                         </div>
+                        <input className="form-control" value={c.text} onChange={e => {
+                          const qs = [...editQuizTarget.questions];
+                          qs[qi].choices[ci].text = e.target.value;
+                          setEditQuizTarget({ ...editQuizTarget, questions: qs });
+                        }} />
+                      </div>
                     ))}
-                </div>
-                <div className="modal-footer border-0 p-4 pt-0">
-                    <button className="btn btn-light" onClick={() => setEditQuizTarget(null)}>Cancel</button>
-                    <button className="btn btn-primary px-4 fw-bold" onClick={handleUpdateQuiz}>Save Quiz Updates</button>
-                </div>
+                  </div>
+                ))}
+              </div>
+              <div className="modal-footer border-0 p-4 pt-0">
+                <button className="btn btn-light" onClick={() => setEditQuizTarget(null)}>Cancel</button>
+                <button className="btn btn-primary px-4 fw-bold" onClick={handleUpdateQuiz}>Save Quiz Updates</button>
+              </div>
             </div>
           </div>
         </div>
