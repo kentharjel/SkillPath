@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { Link } from "react-router-dom";
 
 function Achievements() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  
+
   // --- REAL DATA STATES ---
   const [stats, setStats] = useState({
     totalLessons: 0,
     completedPaths: 0,
+    quizzesPassed: 0,
     badges: []
   });
 
@@ -21,55 +22,92 @@ function Achievements() {
         try {
           // 1. Get User Profile
           const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-          const userData = userSnap.exists() 
-            ? { uid: currentUser.uid, ...userSnap.data() } 
+          const userData = userSnap.exists()
+            ? { uid: currentUser.uid, ...userSnap.data() }
             : { uid: currentUser.uid, role: "student" };
           setUser(userData);
 
-          // 2. Fetch User Progress from "userPaths" sub-collection
-          const progressSnap = await getDocs(collection(db, "users", currentUser.uid, "userPaths"));
-          
           let lessonCount = 0;
           let completedPathsCount = 0;
+          let quizCount = 0;
           let earnedBadges = [];
 
-          // 3. Process each path the user has interacted with
-          const progressDocs = progressSnap.docs;
-          
-          for (const progressDoc of progressDocs) {
+          // 2. Fetch Learning Paths Progress
+          const progressSnap = await getDocs(collection(db, "users", currentUser.uid, "userPaths"));
+
+          for (const progressDoc of progressSnap.docs) {
             const progressData = progressDoc.data();
             const pathId = progressDoc.id;
-            const completedInThisPath = progressData.completedLessons?.length || 0;
             
+            const completedInThisPath = progressData.completedLessons?.length || 0;
             lessonCount += completedInThisPath;
 
-            // To check if a path is FULLY completed, we need the total lesson count from the content collection
+            if (progressData.quizScores) {
+              quizCount += Object.keys(progressData.quizScores).length;
+            }
+
             const contentSnap = await getDoc(doc(db, "content", pathId));
             if (contentSnap.exists()) {
               const pathDetails = contentSnap.data();
-              // Get total lessons in this path
               const lessonsMetaSnap = await getDocs(collection(db, "content", pathId, "lessons"));
               const totalLessonsInPath = lessonsMetaSnap.size;
 
-              // If user completed all lessons, they get a badge
               if (completedInThisPath >= totalLessonsInPath && totalLessonsInPath > 0) {
                 completedPathsCount++;
                 earnedBadges.push({
-                  id: pathId,
-                  title: pathDetails.title,
-                  desc: `Mastered all lessons in ${pathDetails.title}`,
-                  icon: "🏆"
+                  id: `path-${pathId}`,
+                  title: `${pathDetails.title} Expert`,
+                  desc: `Mastered every lesson and quiz in this path.`,
+                  icon: "🎓",
+                  category: "Mastery"
                 });
               }
             }
           }
 
+          // 3. Fetch Classroom Quizzes (TakeQuiz)
+          const classesQuery = query(collection(db, "classes"), where("students", "array-contains", currentUser.uid));
+          const classesSnap = await getDocs(classesQuery);
+          
+          for (const classDoc of classesSnap.docs) {
+            const attemptsRef = collection(db, `classes/${classDoc.id}/attempts`);
+            const q = query(attemptsRef, where("studentId", "==", currentUser.uid));
+            const attemptSnaps = await getDocs(q);
+
+            attemptSnaps.forEach(attemptDoc => {
+              const attempt = attemptDoc.data();
+              quizCount++;
+              
+              if (attempt.score === 100) {
+                earnedBadges.push({
+                  id: `ace-${attemptDoc.id}`,
+                  title: "Exam Ace",
+                  desc: `Perfect 100% score in ${attempt.quizTitle || 'Class Quiz'}.`,
+                  icon: "🌟",
+                  category: "Quiz"
+                });
+              }
+            });
+          }
+
+          // 4. Milestone Badges
+          if (quizCount >= 1) {
+            earnedBadges.push({
+              id: "quiz-starter", title: "Test Taker", desc: "Completed your first assessment.", icon: "📝", category: "Milestone"
+            });
+          }
+          if (lessonCount >= 5) {
+            earnedBadges.push({
+              id: "growing", title: "On a Roll", desc: "Completed 5 lessons across your paths.", icon: "🚀", category: "Milestone"
+            });
+          }
+
           setStats({
             totalLessons: lessonCount,
             completedPaths: completedPathsCount,
+            quizzesPassed: quizCount,
             badges: earnedBadges
           });
-
         } catch (error) {
           console.error("Error fetching achievements:", error);
         }
@@ -84,158 +122,128 @@ function Achievements() {
 
   return (
     <div className="bg-white min-vh-100">
-      {/* CSS for Shadow Hover */}
       <style>
         {`
-          .achievement-card {
-            transition: all 0.3s ease;
-          }
-          .achievement-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 1rem 3rem rgba(0,0,0,0.1) !important;
+          /* Cards still have a lift effect for depth, but buttons are strictly static */
+          .hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+          .hover-lift:hover { transform: translateY(-5px); box-shadow: 0 1rem 3rem rgba(0,0,0,0.1) !important; }
+          .ls-tight { letter-spacing: -0.5px; }
+          
+          /* Force disable all animations/transitions for navigation links */
+          .btn-no-anim, .btn-no-anim:hover, .btn-no-anim:active, .btn-no-anim:focus { 
+            transition: none !important; 
+            transform: none !important; 
+            animation: none !important;
           }
         `}
       </style>
 
-      {/* PAGE HEADER */}
-      <section className="bg-light py-5 border-bottom">
+      <header className="py-5 border-bottom bg-light">
         <div className="container py-4 text-center">
-          <h1 className="fw-bold display-5 text-dark">
-            Achievements & Badges
-          </h1>
-          <p className="lead text-muted mt-3">
-            View your earned badges and accomplishments as you progress through
-            your learning paths.
+          <span className="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill mb-2 px-3 fw-bold">Hall of Fame</span>
+          <h1 className="fw-bold display-5 text-dark ls-tight">Achievements & Badges</h1>
+          <p className="lead text-muted mx-auto mt-3" style={{ maxWidth: "700px" }}>
+            Track your milestones from both your independent Learning Paths and your Classroom Quizzes.
           </p>
         </div>
-      </section>
+      </header>
 
-      {/* PAGE BODY */}
-      <section className="py-5">
-        <div className="container" style={{ minHeight: "520px" }}>
-
-          {/* LOADING */}
-          {loading && (
+      <main className="py-5">
+        <div className="container">
+          {loading ? (
             <div className="text-center py-5">
-              <div className="spinner-border text-primary mb-3"></div>
-              <p className="text-muted">Calculating your accomplishments...</p>
+              <div className="spinner-border text-primary" role="status"></div>
+              <p className="text-muted mt-3">Fetching your rewards...</p>
             </div>
-          )}
-
-          {/* GUEST VIEW */}
-          {!loading && !user && (
-            <div className="text-center py-5">
-              <p className="lead text-muted">
-                Please log in to view achievements.
-              </p>
-              <Link to="/login" className="btn btn-primary btn-lg mt-3 rounded-pill px-5 shadow-sm">
-                Log In
-              </Link>
+          ) : !user ? (
+            <div className="text-center py-5 border rounded-4 bg-light">
+              <h3 className="fw-bold">Login to track achievements</h3>
+              <Link to="/login" className="btn btn-primary px-5 py-2 rounded-pill mt-3 shadow-sm btn-no-anim">Sign In</Link>
             </div>
-          )}
-
-          {/* LOGGED-IN VIEW */}
-          {!loading && user && (
+          ) : (
             <>
-              {/* ACTION BAR */}
-              <div className="d-flex justify-content-between align-items-center mb-4">
-                <h4 className="fw-bold mb-0">Student Dashboard</h4>
-                <div className="d-flex gap-2">
-                  {user.role === "student" ? (
-                    <Link to="/learningpaths" className="btn btn-primary rounded-pill px-4">
-                      Continue Learning
-                    </Link>
+              {/* STATS SUMMARY - Cards keep their lift, but are not navigation links */}
+              <div className="row g-4 mb-5">
+                <SummaryCard value={stats.badges.length} label="Badges Earned" color="primary" bg="bg-primary-subtle" icon="🏅" />
+                <SummaryCard value={stats.quizzesPassed} label="Quizzes Taken" color="warning" bg="bg-warning-subtle" icon="📝" />
+                <SummaryCard value={stats.completedPaths} label="Paths Mastered" color="success" bg="bg-success-subtle" icon="🎓" />
+              </div>
+
+              <div className="p-4 p-md-5 rounded-4 bg-light border shadow-sm">
+                <div className="d-flex justify-content-between align-items-center mb-5 flex-wrap gap-3">
+                  <div>
+                    <h2 className="fw-bold mb-0">Digital Showcase</h2>
+                    <p className="text-muted mb-0">Rewards for lessons and classroom performance.</p>
+                  </div>
+                  <Link to="/learningpaths" className="btn btn-white border rounded-pill shadow-sm px-4 btn-no-anim">
+                    Earn More
+                  </Link>
+                </div>
+
+                <div className="row g-4">
+                  {stats.badges.length > 0 ? (
+                    stats.badges.map((badge) => (
+                      <BadgeCard key={badge.id} badge={badge} />
+                    ))
                   ) : (
-                    <button className="btn btn-outline-primary rounded-pill px-4">
-                      Create a Class
-                    </button>
+                    <div className="col-12 text-center py-5">
+                      <div className="display-1 opacity-25 mb-3">🛡️</div>
+                      <h5>No badges yet</h5>
+                      <p className="text-muted">Take a quiz or finish a lesson to start your collection!</p>
+                    </div>
                   )}
                 </div>
               </div>
 
-              {/* SUMMARY CARDS */}
-              <div className="row g-4 mb-5">
-                <SummaryCard value={stats.badges.length} label="Total Badges" color="primary" />
-                <SummaryCard value={stats.completedPaths} label="Completed Paths" color="success" />
-                <SummaryCard value={stats.totalLessons} label="Lessons Completed" color="warning" />
-              </div>
-
-              {/* BADGES GRID */}
-              <section className="bg-light py-5 rounded-4 shadow-sm">
-                <div className="container">
-                  <div className="mb-5 text-center">
-                    <h2 className="fw-bold">Your Badge Collection</h2>
-                    <p className="text-muted">
-                      {stats.badges.length > 0 
-                        ? "You've been busy! Here are your earned milestones." 
-                        : "Start completing learning paths to unlock your first badge!"}
-                    </p>
-                  </div>
-
-                  <div className="row g-4 justify-content-center">
-                    {stats.badges.length > 0 ? (
-                      stats.badges.map((badge) => (
-                        <BadgeCard
-                          key={badge.id}
-                          icon={badge.icon}
-                          title={badge.title}
-                          desc={badge.desc}
-                        />
-                      ))
-                    ) : (
-                      <div className="col-12 text-center py-4">
-                        <div className="display-1 text-muted opacity-25 mb-3">Empty</div>
-                        <p className="text-muted">No badges earned yet.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </section>
-
-              {/* CTA */}
-              <section className="py-5">
-                <div className="bg-primary text-white rounded-4 p-5 text-center shadow">
-                  <h2 className="fw-bold">Keep Earning Badges!</h2>
-                  <p className="mt-3 mb-4 opacity-75">
-                    Every lesson you finish brings you closer to your next achievement.
-                  </p>
-                  <Link
-                    to="/learningpaths"
-                    className="btn btn-light btn-lg fw-semibold rounded-pill px-5"
-                  >
-                    Explore Learning Paths
+              {/* ACTION FOOTER - Strictly static navigation */}
+              <div className="mt-5 p-5 rounded-4 bg-primary text-white text-center shadow">
+                <h2 className="fw-bold mb-3">Keep the Momentum!</h2>
+                <p className="opacity-75 mb-4">Every quiz you take and every lesson you finish adds to your skills.</p>
+                <div className="d-flex justify-content-center gap-3">
+                  <Link to="/learningpaths" className="btn btn-light rounded-pill px-4 fw-bold btn-no-anim">
+                    Independent Paths
+                  </Link>
+                  <Link to="/progress" className="btn btn-outline-light rounded-pill px-4 btn-no-anim">
+                    View Class Progress
                   </Link>
                 </div>
-              </section>
+              </div>
             </>
           )}
         </div>
-      </section>
+      </main>
     </div>
   );
 }
 
-/* ---------- COMPONENTS ---------- */
-
-const SummaryCard = ({ value, label, color }) => (
+const SummaryCard = ({ value, label, color, bg, icon }) => (
   <div className="col-md-4">
-    <div className="card border-0 shadow-sm rounded-4 text-center h-100 achievement-card">
-      <div className="card-body p-4">
-        <h1 className={`fw-bold text-${color} display-4`}>{value}</h1>
-        <p className="text-uppercase fw-bold small text-muted mb-0">{label}</p>
+    <div className={`card border-0 rounded-4 p-4 hover-lift h-100 ${bg}`}>
+      <div className="card-body d-flex align-items-center">
+        <div className="display-6 me-3">{icon}</div>
+        <div>
+          <h2 className={`fw-black text-${color} mb-0`}>{value}</h2>
+          <span className="text-uppercase fw-bold small text-muted">{label}</span>
+        </div>
       </div>
     </div>
   </div>
 );
 
-const BadgeCard = ({ icon, title, desc }) => (
-  <div className="col-md-3">
-    <div className="card h-100 border-0 shadow-sm rounded-4 text-center p-4 achievement-card">
-      <div className="display-4 mb-3">{icon}</div>
-      <h6 className="fw-bold mb-1">{title}</h6>
-      <p className="text-muted small mb-0">{desc}</p>
-      <div className="mt-3">
-        <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill">Unlocked</span>
+const BadgeCard = ({ badge }) => (
+  <div className="col-sm-6 col-md-4 col-lg-3">
+    <div className="card h-100 border-0 shadow-sm rounded-4 text-center p-4 hover-lift bg-white">
+      <div className="display-4 mb-3">{badge.icon}</div>
+      <h6 className="fw-bold mb-1">{badge.title}</h6>
+      <p className="text-muted small mb-3">{badge.desc}</p>
+      <div className="mt-auto">
+        <span className={`badge rounded-pill px-3 py-2 ${
+          badge.category === 'Quiz' ? 'bg-warning-subtle text-warning' :
+          badge.category === 'Mastery' ? 'bg-primary-subtle text-primary' :
+          'bg-success-subtle text-success'
+        }`}>
+          {badge.category}
+        </span>
       </div>
     </div>
   </div>

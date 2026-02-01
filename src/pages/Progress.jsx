@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { auth, db } from "../firebase"; // Ensure db is imported
+import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { Link, useNavigate } from "react-router-dom";
 import { 
@@ -8,20 +8,22 @@ import {
   where, 
   getDocs, 
   doc, 
-  getDoc 
+  getDoc,
+  collectionGroup
 } from "firebase/firestore";
 
 function Progress() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   
-  // Real Data State
   const [pathProgressData, setPathProgressData] = useState([]);
   const [enrolledClasses, setEnrolledClasses] = useState([]);
+  const [classroomQuizzes, setClassroomQuizzes] = useState([]);
   const [stats, setStats] = useState({
     totalLessons: 0,
     pathsStarted: 0,
-    classesJoined: 0
+    classesJoined: 0,
+    quizzesPassed: 0
   });
 
   useEffect(() => {
@@ -34,36 +36,42 @@ function Progress() {
         setLoading(false);
       }
     });
-
     return () => unsubscribe();
   }, []);
 
   const fetchStudentData = async (uid) => {
     try {
       // 1. Fetch Enrolled Classes
-      // Query: Find classes where the 'students' array contains the user's UID
       const classesQuery = query(collection(db, "classes"), where("students", "array-contains", uid));
       const classesSnap = await getDocs(classesQuery);
       const classesList = classesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setEnrolledClasses(classesList);
 
-      // 2. Fetch Learning Paths Progress
-      // Get the tracking docs from users/{uid}/userPaths
+      // 2. Fetch Classroom Quiz Attempts
+      let allAttempts = [];
+      for (const cls of classesList) {
+        const attemptsRef = collection(db, `classes/${cls.id}/attempts`);
+        const q = query(attemptsRef, where("studentId", "==", uid));
+        const snap = await getDocs(q);
+        snap.forEach(doc => allAttempts.push({ id: doc.id, ...doc.data(), className: cls.className }));
+      }
+      setClassroomQuizzes(allAttempts);
+
+      // 3. Fetch Learning Paths Progress
       const userPathsSnap = await getDocs(collection(db, "users", uid, "userPaths"));
-      
       const pathsPromises = userPathsSnap.docs.map(async (progressDoc) => {
         const pathId = progressDoc.id;
-        const progressData = progressDoc.data(); // Contains completedLessons array
+        const progressData = progressDoc.data();
         const completedCount = progressData.completedLessons?.length || 0;
-
-        // Fetch the actual Path details (Title, etc.)
-        const pathContentDoc = await getDoc(doc(db, "content", pathId));
         
-        if (!pathContentDoc.exists()) return null; // path might have been deleted
+        // Quiz progress in Path
+        const quizCount = Object.keys(progressData.studentAnswers || {}).length;
+        const perfectQuizzes = Object.values(progressData.studentAnswers || {}).filter(q => q.isPerfect).length;
+
+        const pathContentDoc = await getDoc(doc(db, "content", pathId));
+        if (!pathContentDoc.exists()) return null;
         const pathContent = pathContentDoc.data();
 
-        // Fetch total lessons count for this path to calculate %
-        // (Fetching the subcollection size)
         const lessonsSnap = await getDocs(collection(db, "content", pathId, "lessons"));
         const totalLessons = lessonsSnap.size;
 
@@ -72,26 +80,25 @@ function Progress() {
           title: pathContent.title,
           completedCount,
           totalLessons,
+          perfectQuizzes,
           percent: totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0,
-          lastUpdated: progressData.updatedAt // For sorting recent activity
+          lastUpdated: progressData.updatedAt
         };
       });
 
-      // Wait for all path data to resolve
       const resolvedPaths = (await Promise.all(pathsPromises)).filter(p => p !== null);
-      
-      // Sort by recently updated if possible, otherwise just list
       resolvedPaths.sort((a, b) => (b.lastUpdated?.seconds || 0) - (a.lastUpdated?.seconds || 0));
-
       setPathProgressData(resolvedPaths);
 
-      // 3. Calculate Global Stats
+      // 4. Calculate Global Stats
       const totalLessonsCompleted = resolvedPaths.reduce((acc, curr) => acc + curr.completedCount, 0);
+      const totalPathQuizzes = resolvedPaths.reduce((acc, curr) => acc + curr.perfectQuizzes, 0);
       
       setStats({
         totalLessons: totalLessonsCompleted,
         pathsStarted: resolvedPaths.length,
-        classesJoined: classesList.length
+        classesJoined: classesList.length,
+        quizzesPassed: totalPathQuizzes + allAttempts.length
       });
 
     } catch (error) {
@@ -109,21 +116,15 @@ function Progress() {
 
   return (
     <>
-      {/* PAGE HEADER */}
       <section className="bg-light py-5 border-bottom">
         <div className="container py-4 text-center">
           <h1 className="fw-bold display-5 text-dark">My Progress</h1>
-          <p className="lead text-muted mt-3">
-            Track your learning progress, completed lessons, and class enrollments.
-          </p>
+          <p className="lead text-muted mt-3">Track your learning journey, quiz scores, and class performance.</p>
         </div>
       </section>
 
-      {/* PAGE BODY */}
       <section className="py-5">
         <div className="container" style={{ minHeight: "520px" }}>
-
-          {/* LOADING */}
           {loading && (
             <div className="text-center text-muted py-5">
               <div className="spinner-border text-primary mb-3" role="status"></div>
@@ -131,69 +132,86 @@ function Progress() {
             </div>
           )}
 
-          {/* GUEST VIEW */}
           {!loading && !user && (
-            <div className="text-center py-5">
-              <p className="lead text-muted">
-                Please log in to view your progress.
-              </p>
-              <Link to="/login" className="btn btn-primary btn-lg mt-3">
-                Log In
-              </Link>
+            /* UPDATED GUEST UI */
+            <div className="row justify-content-center">
+              <div className="col-lg-8 text-center py-5 px-4 bg-white rounded-4 border shadow-sm">
+                <div className="display-1 mb-4">📊</div>
+                <h2 className="fw-bold text-dark">Analyze Your Growth</h2>
+                <p className="text-muted mx-auto mb-4" style={{ maxWidth: "550px" }}>
+                  Sign in to view your personalized dashboard. Track lesson completion, 
+                  quiz performance across classes, and earn certificates as you progress.
+                </p>
+                <div className="row g-3 justify-content-center mb-4 text-start">
+                  <div className="col-sm-5 col-md-4">
+                    <div className="p-3 bg-light rounded-3 small">
+                      ✅ <strong>Lesson Tracking</strong>
+                    </div>
+                  </div>
+                  <div className="col-sm-5 col-md-4">
+                    <div className="p-3 bg-light rounded-3 small">
+                      📈 <strong>Skill Analytics</strong>
+                    </div>
+                  </div>
+                </div>
+                <div className="d-flex justify-content-center gap-3">
+                  <Link to="/login" className="btn btn-primary btn-lg px-5 rounded-pill shadow-sm">
+                    Log In
+                  </Link>
+                  <Link to="/getstarted" className="btn btn-outline-dark btn-lg px-5 rounded-pill">
+                    Join SkillPath
+                  </Link>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* LOGGED-IN VIEW */}
           {!loading && user && (
             <>
-              {/* OVERVIEW CARDS */}
               <div className="row g-4 mb-5">
-                <OverviewCard 
-                  value={`${getOverallProgress()}%`} 
-                  label="Avg. Path Completion" 
-                  highlight="primary" 
-                />
-                <OverviewCard 
-                  value={stats.totalLessons} 
-                  label="Total Lessons Finished" 
-                />
-                <OverviewCard 
-                  value={stats.pathsStarted} 
-                  label="Active Learning Paths" 
-                />
-                <OverviewCard 
-                  value={stats.classesJoined} 
-                  label="Classes Enrolled" 
-                  highlight="success" 
-                />
+                <OverviewCard value={`${getOverallProgress()}%`} label="Avg. Path Completion" highlight="primary" />
+                <OverviewCard value={stats.totalLessons} label="Lessons Finished" />
+                <OverviewCard value={stats.quizzesPassed} label="Quizzes Passed" highlight="warning" />
+                <OverviewCard value={stats.classesJoined} label="Classes Joined" highlight="success" />
               </div>
 
-              {/* LEARNING PATH PROGRESS */}
+              {/* LEARNING PATHS SECTION */}
               <section className="mb-5">
-                <div className="mb-4 d-flex justify-content-between align-items-end">
-                  <div>
-                    <h2 className="fw-bold">Learning Paths</h2>
-                    <p className="text-muted mb-0">Courses you have started.</p>
-                  </div>
-                  <Link to="/learningpaths" className="btn btn-outline-secondary btn-sm">Find More Paths</Link>
-                </div>
-
+                <h2 className="fw-bold mb-4">Learning Paths</h2>
                 <div className="row g-4">
                   {pathProgressData.length > 0 ? (
                     pathProgressData.map((path) => (
-                      <PathCard
-                        key={path.id}
-                        pathId={path.id}
-                        title={path.title}
-                        progressText={`${path.completedCount} of ${path.totalLessons} lessons completed`}
-                        percent={path.percent}
-                        color={path.percent === 100 ? "success" : "primary"}
-                      />
+                      <PathCard key={path.id} path={path} />
                     ))
                   ) : (
                     <div className="col-12 text-center py-5 bg-light rounded-4">
-                        <p className="text-muted mb-2">You haven't started any learning paths yet.</p>
-                        <Link to="/learningpaths" className="btn btn-primary btn-sm">Start Learning</Link>
+                      <p className="text-muted">No paths started.</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* QUIZ PERFORMANCE SECTION */}
+              <section className="mb-5">
+                <h2 className="fw-bold mb-4">Classroom Quiz Attempts</h2>
+                <div className="row g-4">
+                  {classroomQuizzes.length > 0 ? (
+                    classroomQuizzes.map((quiz) => (
+                      <div key={quiz.id} className="col-md-4">
+                        <div className="card border-0 shadow-sm rounded-4 h-100">
+                          <div className="card-body d-flex align-items-center gap-3">
+                            <CircularGauge percent={quiz.score} color={quiz.score >= 70 ? "success" : "primary"} />
+                            <div>
+                              <h6 className="fw-bold mb-0">{quiz.quizTitle}</h6>
+                              <small className="text-muted">{quiz.className}</small>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-12 text-center py-4 bg-light rounded-4">
+                      <p className="text-muted">No classroom quizzes taken yet.</p>
                     </div>
                   )}
                 </div>
@@ -201,23 +219,15 @@ function Progress() {
 
               {/* ENROLLED CLASSES */}
               <section className="mb-5">
-                <div className="mb-4">
-                  <h2 className="fw-bold">My Classes</h2>
-                  <p className="text-muted">Classes you are currently enrolled in.</p>
-                </div>
-
+                <h2 className="fw-bold mb-4">My Classes</h2>
                 <div className="row g-4">
                   {enrolledClasses.length > 0 ? (
                     enrolledClasses.map((cls) => (
-                      <ClassCard 
-                        key={cls.id} 
-                        classData={cls} 
-                      />
+                      <ClassCard key={cls.id} classData={cls} />
                     ))
                   ) : (
-                     <div className="col-12 text-center py-5 bg-light rounded-4">
-                        <p className="text-muted mb-2">You are not enrolled in any classes.</p>
-                        <Link to="/classes" className="btn btn-primary btn-sm">Browse Classes</Link>
+                      <div className="col-12 text-center py-5 bg-light rounded-4">
+                        <p className="text-muted">No enrollments found.</p>
                     </div>
                   )}
                 </div>
@@ -232,41 +242,48 @@ function Progress() {
 
 /* ---------- COMPONENTS ---------- */
 
+const CircularGauge = ({ percent, color }) => (
+  <div 
+    className={`gauge-circle ${color === 'success' ? 'gauge-success' : ''}`} 
+    style={{ "--percentage": `${percent}%` }}
+  >
+    {percent}%
+  </div>
+);
+
 const OverviewCard = ({ value, label, highlight }) => (
   <div className="col-md-3">
     <div className="card border-0 shadow-sm rounded-4 text-center h-100">
       <div className="card-body p-4">
-        <h2 className={`fw-bold ${highlight ? `text-${highlight}` : ""}`}>
-          {value}
-        </h2>
+        <h2 className={`fw-bold ${highlight ? `text-${highlight}` : ""}`}>{value}</h2>
         <p className="text-muted mb-0">{label}</p>
       </div>
     </div>
   </div>
 );
 
-const PathCard = ({ pathId, title, progressText, percent, color }) => {
+const PathCard = ({ path }) => {
   const navigate = useNavigate();
   return (
     <div className="col-md-6">
       <div className="card border-0 shadow-sm rounded-4 h-100">
-        <div className="card-body p-4">
-          <h5 className="fw-semibold">{title}</h5>
-          <p className="text-muted small">{progressText}</p>
-
-          <div className="progress mb-3" style={{ height: "8px" }}>
-            <div
-              className={`progress-bar bg-${color}`}
-              style={{ width: `${percent}%` }}
-            ></div>
+        <div className="card-body p-4 d-flex justify-content-between align-items-center">
+          <div className="flex-grow-1">
+            <h5 className="fw-semibold mb-1">{path.title}</h5>
+            <p className="text-muted small mb-2">{path.completedCount} / {path.totalLessons} Lessons</p>
+            <div className="badge bg-light text-dark border small">
+              🏆 {path.perfectQuizzes} Perfect Quizzes
+            </div>
+            <div className="mt-3">
+                <button 
+                onClick={() => navigate("/viewpath", { state: { pathId: path.id } })}
+                className="btn btn-primary btn-sm rounded-pill px-4"
+                >
+                Continue
+                </button>
+            </div>
           </div>
-
-          <button 
-            onClick={() => navigate("/viewpath", { state: { pathId } })}
-            className="btn btn-outline-primary btn-sm rounded-pill px-4"
-          >
-            {percent === 100 ? "Review Path" : "Continue Learning"}
-          </button>
+          <CircularGauge percent={path.percent} color={path.percent === 100 ? "success" : "primary"} />
         </div>
       </div>
     </div>

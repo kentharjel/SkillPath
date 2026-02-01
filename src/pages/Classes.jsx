@@ -171,11 +171,29 @@ function Classes() {
 
           <div className="row g-4">
             {loading ? (
-              <div className="text-center py-5">Loading classes...</div>
+              <div className="col-12 text-center py-5">
+                <div className="spinner-border text-primary" role="status"></div>
+                <p className="mt-3 text-muted">Loading classes...</p>
+              </div>
             ) : !user ? (
-              <div className="text-center py-5">
-                <p className="lead text-muted">Please log in to view classes.</p>
-                <Link to="/login" className="btn btn-primary btn-lg mt-3">Log In</Link>
+              /* UPDATED GUEST UI */
+              <div className="col-12">
+                <div className="text-center py-5 px-4 bg-white rounded-4 border shadow-sm">
+                  <div className="display-1 mb-4">🏫</div>
+                  <h2 className="fw-bold text-dark">Your Digital Classroom Awaits</h2>
+                  <p className="text-muted mx-auto mb-4" style={{ maxWidth: "600px" }}>
+                    Join a class with a code from your professor or create your own academic hub. 
+                    Sign in to sync your progress across all your devices.
+                  </p>
+                  <div className="d-flex justify-content-center gap-3">
+                    <Link to="/login" className="btn btn-primary btn-lg px-5 rounded-pill shadow-sm">
+                      Log In to Start
+                    </Link>
+                    <Link to="/getstarted" className="btn btn-outline-dark btn-lg px-5 rounded-pill">
+                      Register
+                    </Link>
+                  </div>
+                </div>
               </div>
             ) : classList.length > 0 ? (
               classList.map(cls => (
@@ -188,7 +206,11 @@ function Classes() {
                 />
               ))
             ) : (
-              <div className="text-center py-5 text-muted">No classes found. Join or create one to get started!</div>
+              <div className="col-12 text-center py-5 text-muted">
+                <div className="mb-3 display-4 opacity-25">📂</div>
+                <h5>No classes found</h5>
+                <p>Join or create one to get started!</p>
+              </div>
             )}
           </div>
         </div>
