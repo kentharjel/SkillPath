@@ -124,12 +124,9 @@ function Achievements() {
     <div className="bg-white min-vh-100">
       <style>
         {`
-          /* Cards still have a lift effect for depth, but buttons are strictly static */
           .hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
           .hover-lift:hover { transform: translateY(-5px); box-shadow: 0 1rem 3rem rgba(0,0,0,0.1) !important; }
           .ls-tight { letter-spacing: -0.5px; }
-          
-          /* Force disable all animations/transitions for navigation links */
           .btn-no-anim, .btn-no-anim:hover, .btn-no-anim:active, .btn-no-anim:focus { 
             transition: none !important; 
             transform: none !important; 
@@ -149,20 +146,47 @@ function Achievements() {
       </header>
 
       <main className="py-5">
-        <div className="container">
+        <div className="container" style={{ minHeight: "500px" }}>
           {loading ? (
             <div className="text-center py-5">
               <div className="spinner-border text-primary" role="status"></div>
               <p className="text-muted mt-3">Fetching your rewards...</p>
             </div>
           ) : !user ? (
-            <div className="text-center py-5 border rounded-4 bg-light">
-              <h3 className="fw-bold">Login to track achievements</h3>
-              <Link to="/login" className="btn btn-primary px-5 py-2 rounded-pill mt-3 shadow-sm btn-no-anim">Sign In</Link>
+            /* UPDATED GUEST VIEW UI */
+            <div className="row justify-content-center">
+              <div className="col-lg-8 text-center py-5 px-4 bg-white rounded-4 border shadow-sm">
+                <div className="display-1 mb-4">🏅</div>
+                <h2 className="fw-bold text-dark">Celebrate Your Milestones</h2>
+                <p className="text-muted mx-auto mb-4" style={{ maxWidth: "550px" }}>
+                  Earn digital badges as you complete lessons, master learning paths, and ace classroom quizzes. 
+                  Start building your professional showcase today.
+                </p>
+                <div className="row g-3 justify-content-center mb-4 text-start">
+                  <div className="col-sm-5 col-md-4">
+                    <div className="p-3 bg-light rounded-3 small">
+                      ⭐ <strong>Skill Mastery</strong>
+                    </div>
+                  </div>
+                  <div className="col-sm-5 col-md-4">
+                    <div className="p-3 bg-light rounded-3 small">
+                      🏆 <strong>Quiz Rewards</strong>
+                    </div>
+                  </div>
+                </div>
+                <div className="d-flex justify-content-center gap-3">
+                  <Link to="/login" className="btn btn-primary btn-lg px-5 rounded-pill shadow-sm btn-no-anim">
+                    Log In
+                  </Link>
+                  <Link to="/getstarted" className="btn btn-outline-dark btn-lg px-5 rounded-pill btn-no-anim">
+                    Join Now
+                  </Link>
+                </div>
+              </div>
             </div>
           ) : (
             <>
-              {/* STATS SUMMARY - Cards keep their lift, but are not navigation links */}
+              {/* STATS SUMMARY */}
               <div className="row g-4 mb-5">
                 <SummaryCard value={stats.badges.length} label="Badges Earned" color="primary" bg="bg-primary-subtle" icon="🏅" />
                 <SummaryCard value={stats.quizzesPassed} label="Quizzes Taken" color="warning" bg="bg-warning-subtle" icon="📝" />
@@ -195,7 +219,7 @@ function Achievements() {
                 </div>
               </div>
 
-              {/* ACTION FOOTER - Strictly static navigation */}
+              {/* ACTION FOOTER */}
               <div className="mt-5 p-5 rounded-4 bg-primary text-white text-center shadow">
                 <h2 className="fw-bold mb-3">Keep the Momentum!</h2>
                 <p className="opacity-75 mb-4">Every quiz you take and every lesson you finish adds to your skills.</p>
