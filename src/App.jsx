@@ -23,32 +23,34 @@ function App() {
   return (
     <>
       <div className="d-flex flex-column min-vh-100">
-      {/* Top */}
-      <Navbar />
+        {/* Top Navbar Area - Wrapped with an ID wrapper for DOM manipulation control */}
+        <div id="main-global-navbar">
+          <Navbar />
+        </div>
 
-      {/* Main content area */}
-      <main className="flex-grow-1 container py-4">
-       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/getstarted" element={<GetStarted />} />
-        <Route path='/learningpaths' element={<LearningPaths />} />
-        <Route path="/classes" element={<Classes />} />
-        <Route path="/progress" element={<Progress />} />
-        <Route path="/achievements" element={<Achievements />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/viewpath" element={<ViewPath />} />
-        <Route path="/viewclass" element={<ViewClass />} />
-        <Route path="/signup" element={<SignUp />} />
-        <Route path="/admin" element={<Admin />} />
-        <Route path="/viewlesson" element={<ViewLesson />} />
-        <Route path="/takequiz" element={<TakeQuiz />} />
-       </Routes>
-      </main>
+        {/* Main content area */}
+        <main className="flex-grow-1 container py-4">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/getstarted" element={<GetStarted />} />
+            <Route path='/learningpaths' element={<LearningPaths />} />
+            <Route path="/classes" element={<Classes />} />
+            <Route path="/progress" element={<Progress />} />
+            <Route path="/achievements" element={<Achievements />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/viewpath" element={<ViewPath />} />
+            <Route path="/viewclass" element={<ViewClass />} />
+            <Route path="/signup" element={<SignUp />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/viewlesson" element={<ViewLesson />} />
+            <Route path="/takequiz" element={<TakeQuiz />} />
+          </Routes>
+        </main>
 
-      {/* Bottom */}
-      <Footer />
-    </div>
+        {/* Bottom */}
+        <Footer />
+      </div>
     </>
   )
 }

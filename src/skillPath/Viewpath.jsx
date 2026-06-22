@@ -34,7 +34,8 @@ function ViewPath() {
 
   // --- STUDENT NAVIGATION ENGINE ---
   const [viewMode, setViewMode] = useState("list");
-  const [activeItem, setActiveItem] = useState(null);
+  const [activeLessonId, setActiveLessonId] = useState(null);
+  const [activeQuizId, setActiveQuizId] = useState(null);
 
   // --- ADMIN FORM STATES ---
   const [lessonForm, setLessonForm] = useState({ title: "", description: "", links: [] });
@@ -54,8 +55,6 @@ function ViewPath() {
 
   const getCollectionName = (type) => (type === "quiz" ? "quizzes" : "lessons");
 
-  // --- UPDATED LOGO HELPER ---
-  // This uses Google S2 to fetch the official favicon of the domain
   const getLinkIcon = (url) => {
     try {
       const domain = new URL(url).hostname;
@@ -68,6 +67,15 @@ function ViewPath() {
       );
     } catch (e) {
       return <span>🔗</span>;
+    }
+  };
+
+  // Helper helper to parse domain names safely without throwing crashes
+  const getSafeHostname = (url) => {
+    try {
+      return new URL(url).hostname;
+    } catch (e) {
+      return "External Link";
     }
   };
 
@@ -226,7 +234,8 @@ function ViewPath() {
     e.preventDefault();
     if (!lessonForm.title) return alert("Title required");
     await addDoc(collection(db, "content", pathId, "lessons"), {
-      ...lessonForm,
+      title: lessonForm.title,
+      description: lessonForm.description,
       links: lessonForm.links || [],
       createdBy: user.uid,
       createdAt: serverTimestamp()
@@ -334,8 +343,40 @@ function ViewPath() {
     }
   };
 
+  const initialActiveQuiz = quizzes.find((q) => q.id === activeQuizId);
+  const isQuizOngoing = 
+    viewMode === "quiz" && 
+    initialActiveQuiz && 
+    Object.keys(studentAnswers[initialActiveQuiz.id] || {}).length < (initialActiveQuiz.questions?.length || 0);
+
+  useEffect(() => {
+    const globalNavbar = document.getElementById("main-global-navbar");
+
+    if (isQuizOngoing) {
+      if (globalNavbar) globalNavbar.style.display = "none";
+    } else {
+      if (globalNavbar) globalNavbar.style.display = "block";
+    }
+
+    const handleBeforeUnload = (e) => {
+      if (isQuizOngoing) {
+        e.preventDefault();
+        e.returnValue = "Warning: Leaving this page will drop your progress!";
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      if (globalNavbar) globalNavbar.style.display = "block";
+    };
+  }, [isQuizOngoing]);
+
   if (loading || !path) return <div className="text-center py-5"><div className="spinner-border text-primary"></div></div>;
 
+  const activeLesson = lessons.find((l) => l.id === activeLessonId);
+  const activeQuiz = quizzes.find((q) => q.id === activeQuizId);
   const progressPercent = lessons.length ? Math.round((completedLessons.length / lessons.length) * 100) : 0;
 
   return (
@@ -383,53 +424,57 @@ function ViewPath() {
       </style>
 
       {/* HEADER SECTION */}
-      <section className="bg-white border-bottom py-4 mb-4 shadow-sm">
-        <div className="container">
-          <div className="d-flex justify-content-between align-items-center mb-3">
-            <button
-              className="btn btn-sm btn-outline-secondary rounded-pill"
-              onClick={() => viewMode === "list" ? navigate(-1) : setViewMode("list")}
-            >
-              ← {viewMode === "list" ? "Back to Paths" : "Back to Course Menu"}
-            </button>
-
-            {user?.role === "student" && (
-              <div
-                className="bg-white px-3 py-1 rounded-pill border d-flex align-items-center shadow-sm heart-container"
-                style={{ cursor: 'pointer' }}
-                onClick={() => setShowHeartModal(true)}
+      {!isQuizOngoing && (
+        <section className="bg-white border-bottom py-4 mb-4 shadow-sm">
+          <div className="container">
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <button
+                className="btn btn-sm btn-outline-secondary rounded-pill"
+                onClick={() => viewMode === "list" ? navigate(-1) : setViewMode("list")}
               >
-                <span className="heart-main me-2">❤️</span>
-                <span className="fw-bold text-dark" style={{ fontSize: '1.1rem' }}>
-                  {hearts}
-                </span>
-                {hearts < 5 && <span className="ms-2 badge bg-light text-muted border" style={{ fontSize: '10px' }}>Regenerating...</span>}
-              </div>
-            )}
-          </div>
+                ← {viewMode === "list" ? "Back to Paths" : "Back to Course Menu"}
+              </button>
 
-          {viewMode === "list" && (
-            <div className="d-flex justify-content-between align-items-end">
-              <div>
-                <span className="badge bg-primary mb-2 text-uppercase">{user?.role === 'admin' ? 'Path Management' : 'Learning Path'}</span>
-                <h1 className="fw-bolder mb-1">{path.title}</h1>
-                <p className="text-muted mb-0">{path.description}</p>
-              </div>
               {user?.role === "student" && (
-                <div className="text-end" style={{ width: "220px" }}>
-                  <div className="d-flex justify-content-between small fw-bold mb-1">
-                    <span>PATH PROGRESS</span>
-                    <span>{progressPercent}%</span>
-                  </div>
-                  <div className="progress" style={{ height: "10px" }}>
-                    <div className="progress-bar bg-success progress-bar-striped progress-bar-animated" style={{ width: `${progressPercent}%` }}></div>
-                  </div>
+                <div
+                  className="bg-white px-3 py-1 rounded-pill border d-flex align-items-center shadow-sm heart-container"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setShowHeartModal(true)}
+                >
+                  <span className="heart-main me-2">❤️</span>
+                  <span className="fw-bold text-dark" style={{ fontSize: '1.1rem' }}>
+                    {hearts}
+                  </span>
+                  {hearts < 5 && <span className="ms-2 badge bg-light text-muted border" style={{ fontSize: '10px' }}>Regenerating...</span>}
                 </div>
               )}
             </div>
-          )}
-        </div>
-      </section>
+
+            {viewMode === "list" && (
+              <div className="d-flex justify-content-between align-items-end">
+                <div>
+                  <span className="badge bg-primary mb-2 text-uppercase">{user?.role === 'admin' ? 'Path Management' : 'Learning Path'}</span>
+                  <h1 className="fw-bolder mb-1">{path.title}</h1>
+                  <p className="text-muted mb-0">{path.description}</p>
+                </div>
+                {user?.role === "student" && (
+                  <div className="text-end" style={{ width: "220px" }}>
+                    <div className="d-flex justify-content-between small fw-bold mb-1">
+                      <span>PATH PROGRESS</span>
+                      <span>{progressPercent}%</span>
+                    </div>
+                    <div className="progress" style={{ height: "10px" }}>
+                      <div className="progress-bar bg-success progress-bar-striped progress-bar-animated" style={{ width: `${progressPercent}%` }}></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {isQuizOngoing && <div className="py-4" />}
 
       <div className="container">
         {user?.role === "admin" ? (
@@ -441,7 +486,6 @@ function ViewPath() {
                 <input className="form-control mb-2" placeholder="Lesson Title" value={lessonForm.title} onChange={e => setLessonForm({ ...lessonForm, title: e.target.value })} />
                 <textarea className="form-control mb-3" rows="3" placeholder="Lesson Content..." value={lessonForm.description} onChange={e => setLessonForm({ ...lessonForm, description: e.target.value })} />
 
-                {/* ATTACH LINKS FEATURE */}
                 <div className="bg-light p-3 rounded-3 mb-3 border">
                   <label className="small fw-bold mb-2">ATTACH RESOURCES (Optional)</label>
                   <div className="input-group input-group-sm mb-2">
@@ -516,7 +560,6 @@ function ViewPath() {
                       </div>
                       <p className="text-muted small text-truncate" style={{ maxWidth: "400px" }}>{l.description}</p>
 
-                      {/* PREVIEW ATTACHED LINKS */}
                       {l.links?.length > 0 && (
                         <div className="mb-3">
                           {l.links.map((link, li) => (
@@ -581,14 +624,14 @@ function ViewPath() {
                           <div className="d-flex gap-2">
                             <button
                               className="btn btn-primary rounded-pill px-4 fw-bold shadow-sm"
-                              onClick={() => { setActiveItem(lesson); setViewMode("lesson"); }}
+                              onClick={() => { setActiveLessonId(lesson.id); setViewMode("lesson"); }}
                             >
                               Open Lesson
                             </button>
                             {lessonQuiz && (
                               <button
                                 className={`btn rounded-pill px-4 fw-bold ${quizDone ? 'btn-outline-success' : 'btn-outline-warning'}`}
-                                onClick={() => { setActiveItem(lessonQuiz); setViewMode("quiz"); }}
+                                onClick={() => { setActiveQuizId(lessonQuiz.id); setViewMode("quiz"); }}
                               >
                                 {quizDone ? "Review Quiz" : "Take Quiz"}
                               </button>
@@ -601,32 +644,31 @@ function ViewPath() {
                 </div>
               )}
 
-              {viewMode === "lesson" && activeItem && (
+              {viewMode === "lesson" && activeLesson && (
                 <div className="card border-0 shadow rounded-4 p-5 bg-white">
                   <div className="d-flex justify-content-between align-items-start mb-4">
                     <div>
                       <span className="badge bg-primary px-3 py-2 rounded-pill mb-2">READING MODE</span>
-                      <h1 className="fw-bolder">{activeItem.title}</h1>
+                      <h1 className="fw-bolder">{activeLesson.title}</h1>
                     </div>
-                    {completedLessons.includes(activeItem.id) && <h5 className="text-success fw-bold mt-2">✓ Completed</h5>}
+                    {completedLessons.includes(activeLesson.id) && <h5 className="text-success fw-bold mt-2">✓ Completed</h5>}
                   </div>
                   <hr className="mb-4" />
                   <div className="content-body mb-4" style={{ whiteSpace: "pre-wrap", fontSize: "1.15rem", lineHeight: "1.8", color: "#333" }}>
-                    {activeItem.description}
+                    {activeLesson.description}
                   </div>
 
-                  {/* STUDENT VIEW - LESSON LINKS */}
-                  {activeItem.links?.length > 0 && (
+                  {activeLesson.links?.length > 0 && (
                     <div className="mb-5">
                       <h6 className="fw-bold text-muted mb-3">HELPFUL RESOURCES</h6>
                       <div className="row g-2">
-                        {activeItem.links.map((link, li) => (
+                        {activeLesson.links.map((link, li) => (
                           <div key={li} className="col-md-6">
                             <a href={link.url} target="_blank" rel="noopener noreferrer" className="resource-link">
                               <span className="me-2 fs-5 d-flex align-items-center">{getLinkIcon(link.url)}</span>
                               <div>
                                 <div className="fw-bold text-dark small">{link.title}</div>
-                                <div className="text-muted" style={{ fontSize: '10px' }}>{new URL(link.url).hostname}</div>
+                                <div className="text-muted" style={{ fontSize: '10px' }}>{getSafeHostname(link.url)}</div>
                               </div>
                             </a>
                           </div>
@@ -638,25 +680,25 @@ function ViewPath() {
                   <div className="d-flex justify-content-between border-top pt-4">
                     <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Back to Curriculum</button>
                     <button
-                      className={`btn rounded-pill px-5 fw-bold ${completedLessons.includes(activeItem.id) ? 'btn-success' : 'btn-primary shadow'}`}
-                      onClick={() => handleCompleteLesson(activeItem.id)}
+                      className={`btn rounded-pill px-5 fw-bold ${completedLessons.includes(activeLesson.id) ? 'btn-success' : 'btn-primary shadow'}`}
+                      onClick={() => handleCompleteLesson(activeLesson.id)}
                     >
-                      {completedLessons.includes(activeItem.id) ? "✓ Mark as Read" : "Finish Lesson"}
+                      {completedLessons.includes(activeLesson.id) ? "✓ Mark as Read" : "Finish Lesson"}
                     </button>
                   </div>
                 </div>
               )}
 
-              {viewMode === "quiz" && activeItem && (
+              {viewMode === "quiz" && activeQuiz && (
                 <div className="card border-0 shadow rounded-4 p-5 bg-white" ref={quizTopRef}>
                   <div className="d-flex justify-content-between align-items-center mb-4">
-                    <h2 className="fw-bold mb-0 text-primary">{activeItem.title}</h2>
-                    {isQuizPerfect(activeItem) && <span className="badge bg-success p-2 px-3 rounded-pill shadow-sm">100% Correct</span>}
+                    <h2 className="fw-bold mb-0 text-primary">{activeQuiz.title}</h2>
+                    {isQuizPerfect(activeQuiz) && <span className="badge bg-success p-2 px-3 rounded-pill shadow-sm">100% Correct</span>}
                   </div>
                   <p className="text-muted mb-4">Select the correct answer for each question.</p>
                   <hr className="mb-5" />
-                  {activeItem.questions.map((q, qi) => {
-                    const answers = studentAnswers[activeItem.id] || {};
+                  {activeQuiz.questions.map((q, qi) => {
+                    const answers = studentAnswers[activeQuiz.id] || {};
                     return (
                       <div key={qi} className="mb-5 p-4 border rounded-4 bg-light shadow-sm">
                         <h5 className="fw-bold mb-4">{qi + 1}. {q.question}</h5>
@@ -671,8 +713,8 @@ function ViewPath() {
                               <div key={ci} className="col-md-6">
                                 <button
                                   className={`btn w-100 text-start p-3 rounded-3 fw-bold choice-card-btn ${extraClass}`}
-                                  disabled={answers[qi] !== undefined || isQuizPerfect(activeItem)}
-                                  onClick={() => handleAnswer(activeItem.id, qi, ci, activeItem)}
+                                  disabled={answers[qi] !== undefined || isQuizPerfect(activeQuiz)}
+                                  onClick={() => handleAnswer(activeQuiz.id, qi, ci, activeQuiz)}
                                 >
                                   {c.text}
                                 </button>
@@ -684,11 +726,13 @@ function ViewPath() {
                     );
                   })}
                   <div className="d-flex gap-3 mt-4">
-                    <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Exit Quiz</button>
-                    {Object.keys(studentAnswers[activeItem.id] || {}).length === activeItem.questions.length && !isQuizPerfect(activeItem) && (
+                    {(!isQuizOngoing || isQuizPerfect(activeQuiz)) && (
+                      <button className="btn btn-light rounded-pill px-4 fw-bold" onClick={() => setViewMode("list")}>Exit Quiz</button>
+                    )}
+                    {Object.keys(studentAnswers[activeQuiz.id] || {}).length === activeQuiz.questions.length && !isQuizPerfect(activeQuiz) && (
                       <button
                         className="btn btn-warning rounded-pill px-4 fw-bold shadow-sm"
-                        onClick={() => handleRedoQuiz(activeItem.id)}
+                        onClick={() => handleRedoQuiz(activeQuiz.id)}
                         disabled={hearts <= 0}
                       >
                         {hearts > 0 ? `Reset & Retake (-1 ❤️)` : "Out of Hearts"}
@@ -745,7 +789,6 @@ function ViewPath() {
                 <input className="form-control mb-2" value={editLessonTarget.title} onChange={e => setEditLessonTarget({ ...editLessonTarget, title: e.target.value })} />
                 <textarea className="form-control mb-3" rows="5" value={editLessonTarget.description} onChange={e => setEditLessonTarget({ ...editLessonTarget, description: e.target.value })} />
 
-                {/* EDIT LINKS IN MODAL */}
                 <div className="bg-light p-3 rounded-3 mb-3 border">
                   <label className="small fw-bold mb-2">UPDATE LINKS</label>
                   <div className="input-group input-group-sm mb-2">
