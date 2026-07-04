@@ -132,7 +132,7 @@ function Navbar() {
         `}
       </style>
 
-      <nav className="navbar navbar-expand-lg navbar-light bg-white shadow-sm sticky-top">
+      <nav className="navbar navbar-expand-lg navbar-light bg-white shadow-sm fixed-top">
         <div className="container">
           <Link className="navbar-brand fw-bold fs-4 text-dark" to="/">
             Skill<span className="text-primary">Path</span>
@@ -200,6 +200,9 @@ function Navbar() {
           </div>
         </div>
       </nav>
+
+      {/* AUTOMATIC STRUCTURAL SPACER TO PREVENT COVERING CONTENT */}
+      <div style={{ height: "76px" }} className="w-100 d-block"></div>
 
       {/* ANIMATED MODAL */}
       <AnimatePresence>
