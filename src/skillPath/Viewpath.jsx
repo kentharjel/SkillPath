@@ -153,7 +153,7 @@ function ViewPath() {
         if (userPathDoc.exists()) {
           const data = userPathDoc.data();
           setCompletedLessons(data.completedLessons || []);
-          setStudentAnswers(data.completedQuizzes || {});
+          setStudentAnswers(data.completedQuizzes || data.studentAnswers || {});
 
           let currentHearts = data.hearts !== undefined ? data.hearts : 5;
           const lastLoss = data.lastHeartLoss?.toDate();
@@ -174,7 +174,7 @@ function ViewPath() {
           }
           setHearts(currentHearts);
         } else {
-          await setDoc(userPathRef, { hearts: 5, completedLessons: [], completedQuizzes: {} });
+          await setDoc(userPathRef, { hearts: 5, completedLessons: [], completedQuizzes: {}, studentAnswers: {} });
           setHearts(5);
         }
       }
@@ -303,7 +303,13 @@ function ViewPath() {
     if (isQuizPerfect(quiz)) return;
     const userPathRef = doc(db, "users", user.uid, "userPaths", pathId);
     const newAnswers = { ...studentAnswers, [quizId]: { ...studentAnswers[quizId], [qIdx]: cIdx } };
-    await setDoc(userPathRef, { completedQuizzes: newAnswers }, { merge: true });
+    
+    // FIX: Writes data under BOTH names so that ViewPath and Progress dashboard stay completely aligned!
+    await setDoc(userPathRef, { 
+      completedQuizzes: newAnswers, 
+      studentAnswers: newAnswers 
+    }, { merge: true });
+    
     setStudentAnswers(newAnswers);
   };
 
@@ -328,8 +334,11 @@ function ViewPath() {
     delete newAnswers[quizId];
     setHearts(newHeartCount);
     setStudentAnswers(newAnswers);
+    
+    // FIX: Clears the record across BOTH field names upon quiz resetting
     const updateData = {
       completedQuizzes: newAnswers,
+      studentAnswers: newAnswers,
       hearts: newHeartCount
     };
     if (hearts === 5) {

@@ -64,7 +64,38 @@ function Classes() {
         q = query(collection(db, "classes"), where("students", "array-contains", userData.uid));
       }
       const snap = await getDocs(q);
-      setClassList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const rawClasses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Background cleanup: verify if student UIDs exist in the 'users' collection
+      const validatedClasses = await Promise.all(
+        rawClasses.map(async (cls) => {
+          if (!cls.students || cls.students.length === 0) {
+            return { ...cls };
+          }
+
+          const validationPromises = cls.students.map(async (studentId) => {
+            const studentDocSnap = await getDoc(doc(db, "users", studentId));
+            return studentDocSnap.exists() ? studentId : null;
+          });
+
+          const verifiedResults = await Promise.all(validationPromises);
+          const activeStudentsOnly = verifiedResults.filter((id) => id !== null);
+
+          // Update Firestore array silently if it contains broken/deleted references
+          if (activeStudentsOnly.length !== cls.students.length) {
+            await updateDoc(doc(db, "classes", cls.id), {
+              students: activeStudentsOnly
+            });
+          }
+
+          return {
+            ...cls,
+            students: activeStudentsOnly
+          };
+        })
+      );
+
+      setClassList(validatedClasses);
     } catch (err) {
       console.error("Error fetching classes:", err);
     } finally {

@@ -42,13 +42,29 @@ function Achievements() {
             const completedInThisPath = progressData.completedLessons?.length || 0;
             lessonCount += completedInThisPath;
 
+            const contentSnap = await getDoc(doc(db, "content", pathId));
+            const pathDetails = contentSnap.exists() ? contentSnap.data() : { title: "Learning Path" };
+
+            // Process independent path quizzes and award badges for achievements here
             if (progressData.quizScores) {
-              quizCount += Object.keys(progressData.quizScores).length;
+              const entries = Object.entries(progressData.quizScores);
+              quizCount += entries.length;
+
+              entries.forEach(([quizId, scoreValue]) => {
+                const numericScore = typeof scoreValue === "object" ? scoreValue.score : scoreValue;
+                if (numericScore === 100) {
+                  earnedBadges.push({
+                    id: `path-ace-${pathId}-${quizId}`,
+                    title: "Path Ace",
+                    desc: `Perfect 100% score in a ${pathDetails.title} quiz.`,
+                    icon: "✨",
+                    category: "Quiz"
+                  });
+                }
+              });
             }
 
-            const contentSnap = await getDoc(doc(db, "content", pathId));
             if (contentSnap.exists()) {
-              const pathDetails = contentSnap.data();
               const lessonsMetaSnap = await getDocs(collection(db, "content", pathId, "lessons"));
               const totalLessonsInPath = lessonsMetaSnap.size;
 

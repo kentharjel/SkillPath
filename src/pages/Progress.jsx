@@ -8,8 +8,7 @@ import {
   where, 
   getDocs, 
   doc, 
-  getDoc,
-  collectionGroup
+  getDoc
 } from "firebase/firestore";
 
 function Progress() {
@@ -57,27 +56,59 @@ function Progress() {
       }
       setClassroomQuizzes(allAttempts);
 
-      // 3. Fetch Learning Paths Progress
+      // 3. Fetch Learning Paths Progress & Cross-Reference Quizzes
       const userPathsSnap = await getDocs(collection(db, "users", uid, "userPaths"));
       const pathsPromises = userPathsSnap.docs.map(async (progressDoc) => {
         const pathId = progressDoc.id;
         const progressData = progressDoc.data();
         const completedCount = progressData.completedLessons?.length || 0;
         
-        // Quiz progress in Path
-        const quizCount = Object.keys(progressData.studentAnswers || {}).length;
-        const perfectQuizzes = Object.values(progressData.studentAnswers || {}).filter(q => q.isPerfect).length;
+        // Fetch original quizzes configuration for answer cross-referencing
+        const quizzesSnap = await getDocs(collection(db, "content", pathId, "quizzes"));
+        const pathQuizzes = quizzesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+        let perfectQuizzes = 0;
+        
+        pathQuizzes.forEach((quiz) => {
+          // Robust check: Look up by document ID or quizId field if present
+          const userAnswersForQuiz = progressData.studentAnswers?.[quiz.id] || progressData.studentAnswers?.[quiz.quizId];
+          
+          if (userAnswersForQuiz && quiz.questions?.length > 0) {
+            let isPerfect = true;
+            
+            quiz.questions.forEach((q, qi) => {
+              // Find index of the option where isCorrect is true
+              const correctChoiceIdx = q.choices?.findIndex(c => c.isCorrect);
+              
+              // Map index 'qi' to a string key ("0", "1") to safely read Firestore map keys
+              const studentSelection = userAnswersForQuiz[String(qi)] !== undefined 
+                ? userAnswersForQuiz[String(qi)] 
+                : userAnswersForQuiz[qi];
+              
+              // Verify user selection matches the correct choice index cleanly
+              if (studentSelection === undefined || Number(studentSelection) !== correctChoiceIdx) {
+                isPerfect = false;
+              }
+            });
+
+            if (isPerfect) {
+              perfectQuizzes++;
+            }
+          }
+        });
+
+        // Fetch parent learning path content metadata
         const pathContentDoc = await getDoc(doc(db, "content", pathId));
         if (!pathContentDoc.exists()) return null;
         const pathContent = pathContentDoc.data();
 
+        // Calculate total structural path lessons count dynamically
         const lessonsSnap = await getDocs(collection(db, "content", pathId, "lessons"));
         const totalLessons = lessonsSnap.size;
 
         return {
           id: pathId,
-          title: pathContent.title,
+          title: pathContent.title || "Untitled Path",
           completedCount,
           totalLessons,
           perfectQuizzes,
@@ -90,7 +121,7 @@ function Progress() {
       resolvedPaths.sort((a, b) => (b.lastUpdated?.seconds || 0) - (a.lastUpdated?.seconds || 0));
       setPathProgressData(resolvedPaths);
 
-      // 4. Calculate Global Stats
+      // 4. Calculate Combined Global Dashboard Metrics
       const totalLessonsCompleted = resolvedPaths.reduce((acc, curr) => acc + curr.completedCount, 0);
       const totalPathQuizzes = resolvedPaths.reduce((acc, curr) => acc + curr.perfectQuizzes, 0);
       
@@ -102,7 +133,7 @@ function Progress() {
       });
 
     } catch (error) {
-      console.error("Error fetching progress:", error);
+      console.error("Error fetching progress runtime data telemetry:", error);
     } finally {
       setLoading(false);
     }
@@ -133,7 +164,6 @@ function Progress() {
           )}
 
           {!loading && !user && (
-            /* UPDATED GUEST UI */
             <div className="row justify-content-center">
               <div className="col-lg-8 text-center py-5 px-4 bg-white rounded-4 border shadow-sm">
                 <div className="display-1 mb-4">📊</div>
@@ -226,8 +256,8 @@ function Progress() {
                       <ClassCard key={cls.id} classData={cls} />
                     ))
                   ) : (
-                      <div className="col-12 text-center py-5 bg-light rounded-4">
-                        <p className="text-muted">No enrollments found.</p>
+                    <div className="col-12 text-center py-5 bg-light rounded-4">
+                      <p className="text-muted">No enrollments found.</p>
                     </div>
                   )}
                 </div>
@@ -240,7 +270,7 @@ function Progress() {
   );
 }
 
-/* ---------- COMPONENTS ---------- */
+/* ---------- INTERNAL RENDERING COMPONENTS ---------- */
 
 const CircularGauge = ({ percent, color }) => (
   <div 
@@ -276,10 +306,10 @@ const PathCard = ({ path }) => {
             </div>
             <div className="mt-3">
                 <button 
-                onClick={() => navigate("/viewpath", { state: { pathId: path.id } })}
-                className="btn btn-primary btn-sm rounded-pill px-4"
+                  onClick={() => navigate("/viewpath", { state: { pathId: path.id } })}
+                  className="btn btn-primary btn-sm rounded-pill px-4"
                 >
-                Continue
+                  Continue
                 </button>
             </div>
           </div>
@@ -297,7 +327,7 @@ const ClassCard = ({ classData }) => {
             <div className="card border-0 shadow-sm rounded-4 h-100 border-start border-4 border-warning">
                 <div className="card-body p-4">
                     <h5 className="fw-bold mb-1">{classData.className}</h5>
-                    <p className="text-muted small mb-3">Prof. {classData.professorName}</p>
+                    <p className="text-muted small mb-3">Prof. {classData.professorName || "Instructor"}</p>
                     <div className="d-grid">
                         <button 
                             className="btn btn-sm btn-light text-primary fw-bold"
