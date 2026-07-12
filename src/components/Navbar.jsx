@@ -96,14 +96,17 @@ function Navbar() {
       { label: "Classes", to: "/classes" },
       { label: "Progress", to: "/progress" },
       { label: "Achievements", to: "/achievements" },
+      { label: "Profile", to: "/profile" }, // Added for Student View
     ];
     if (user.role === "professor") return [
       { label: "Classes", to: "/classes" },
       { label: "About Us", to: "/about" },
+      { label: "Profile", to: "/profile" }, // Added for Professor View
     ];
     if (user.role === "admin") return [
       { label: "Admin Dashboard", to: "/admin" },
       { label: "Learning Paths", to: "/learningpaths" },
+      { label: "Profile", to: "/profile" }, // Added for Admin View
     ];
     return [];
   };
@@ -191,7 +194,10 @@ function Navbar() {
                     className="d-flex align-items-center gap-3"
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                   >
-                    <span className="fw-bold text-primary small">{user.fullname}</span>
+                    {/* Turned name into a navigation element heading directly to the profile layout */}
+                    <Link to="/profile" className="text-decoration-none fw-bold text-primary small hover-opacity">
+                      👤 {user.fullname}
+                    </Link>
                     <button className="btn btn-outline-danger btn-sm px-3 rounded-pill" onClick={handleLogoutClick}>Logout</button>
                   </motion.div>
                 ) : null}

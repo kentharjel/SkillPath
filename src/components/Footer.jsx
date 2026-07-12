@@ -21,10 +21,10 @@ function Footer() {
           <div className="col-md-2">
             <h6 className="fw-semibold text-dark">Platform</h6>
             <ul className="list-unstyled mt-3">
-              <li><a href="#" className="text-muted text-decoration-none">Learning Paths</a></li>
-              <li><a href="#" className="text-muted text-decoration-none">Classes</a></li>
-              <li><a href="#" className="text-muted text-decoration-none">Progress</a></li>
-              <li><a href="#" className="text-muted text-decoration-none">Badges</a></li>
+              <li><a href="/Learningpaths" className="text-muted text-decoration-none">Learning Paths</a></li>
+              <li><a href="/Classes" className="text-muted text-decoration-none">Classes</a></li>
+              <li><a href="/Progress" className="text-muted text-decoration-none">Progress</a></li>
+              <li><a href="/Achievements" className="text-muted text-decoration-none">Achievements</a></li>
             </ul>
           </div>
 
@@ -44,9 +44,6 @@ function Footer() {
             <h6 className="fw-semibold text-dark">Support</h6>
             <ul className="list-unstyled mt-3">
               <li><a href="#" className="text-muted text-decoration-none">Help Center</a></li>
-              <li><a href="#" className="text-muted text-decoration-none">Documentation</a></li>
-              <li><a href="#" className="text-muted text-decoration-none">Privacy Policy</a></li>
-              <li><a href="#" className="text-muted text-decoration-none">Terms of Service</a></li>
             </ul>
           </div>
 

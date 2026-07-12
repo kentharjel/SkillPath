@@ -46,7 +46,7 @@ function Login() {
 
   const handleRoleRouting = (role) => {
     if (role === "admin") navigate("/admin");
-    else navigate("/classes");
+    else navigate("/profile");
   };
 
   const handleGoogleLogin = async () => {
@@ -189,7 +189,7 @@ function Login() {
       <div className="card shadow-lg p-4 rounded-4 border-0" style={{ maxWidth: "400px", width: "100%" }}>
         <div className="text-center mb-4">
           <h2 className="fw-bold text-primary">SkillPath</h2>
-          <p className="text-muted small">Sign in to your account</p>
+          <p className="text-muted small">Login to your account</p>
         </div>
 
         <form onSubmit={handleSubmit}>
