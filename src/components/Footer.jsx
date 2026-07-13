@@ -3,6 +3,7 @@ import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, arrayUnion, onSnapshot } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 function Footer() {
   const [user, setUser] = useState(null);
@@ -11,7 +12,7 @@ function Footer() {
   const [activeRequest, setActiveRequest] = useState(null);
   const [sending, setSending] = useState(false);
 
-  // 1. Monitor user session auth states
+  // 1. Monitor user session auth states safely
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -23,6 +24,7 @@ function Footer() {
             setUser({ uid: currentUser.uid, fullname: currentUser.displayName || "User", email: currentUser.email });
           }
         } catch (err) {
+          console.error("Error loading user in footer:", err);
           setUser({ uid: currentUser.uid, fullname: currentUser.displayName || "User", email: currentUser.email });
         }
       } else {
@@ -36,7 +38,6 @@ function Footer() {
   useEffect(() => {
     if (!user || !showHelp) return;
 
-    // We tie the request document ID directly to the user's UID for clean matching
     const requestDocRef = doc(db, "requests", user.uid);
     
     const unsubscribe = onSnapshot(requestDocRef, (docSnap) => {
@@ -45,15 +46,47 @@ function Footer() {
       } else {
         setActiveRequest(null);
       }
+    }, (error) => {
+      console.error("Firestore snapshot error in footer:", error);
     });
 
     return () => unsubscribe();
   }, [user, showHelp]);
 
-  // 3. Dispatch user chat messages to the database
+  // 3. Fallback-safe AI Auto-Reply Function
+  const generateAIReply = async (userMsgText, currentMessages = []) => {
+    try {
+      const API_KEY = "YOUR_GEMINI_API_KEY"; 
+      
+      if (!API_KEY || API_KEY === "YOUR_GEMINI_API_KEY") {
+        return "Thank you for sending a message! Our team has received your ticket and will respond here shortly.";
+      }
+
+      const genAI = new GoogleGenerativeAI(API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      const systemContext = `You are an AI Support Assistant for "SkillPath", a learning platform where students follow structured learning paths and earn badges, and professors manage classes. Provide a short, friendly support answer (1-3 sentences maximum). Tone: helpful. Always speak as "Admin Support".`;
+
+      const chatHistoryPrompt = currentMessages
+        .map(m => `${m.isAdmin ? "Admin Support" : "User"}: ${m.message}`)
+        .join("\n");
+
+      const finalPrompt = `${systemContext}\n\nChat History:\n${chatHistoryPrompt}\nUser: ${userMsgText}\nAdmin Support:`;
+
+      const result = await model.generateContent(finalPrompt);
+      const response = await result.response;
+      return response.text().trim();
+    } catch (error) {
+      console.error("AI Auto-reply generation failed:", error);
+      return "Your message was logged. Admin Support will get back to you as soon as possible!";
+    }
+  };
+
+  // 4. Send Message (Automatically Reopens Tickets if Resolved)
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!chatMessage.trim() || !user || sending) return;
+    const cleanMessage = chatMessage.trim();
+    if (!cleanMessage || !user || sending) return;
 
     setSending(true);
     try {
@@ -62,13 +95,15 @@ function Footer() {
       const newMsg = {
         senderId: user.uid,
         senderName: user.fullname || "User",
-        message: chatMessage.trim(),
+        message: cleanMessage,
         timestamp: new Date().toISOString(),
         isAdmin: false
       };
 
+      let currentMessages = activeRequest?.messages || [];
+      let updatedMessages = [...currentMessages, newMsg];
+
       if (!activeRequest) {
-        // Create a new support ticket structure if it doesn't exist yet
         await setDoc(requestDocRef, {
           id: user.uid,
           userName: user.fullname || "User",
@@ -79,7 +114,7 @@ function Footer() {
           messages: [newMsg]
         });
       } else {
-        // Append message string onto current support conversation array stream
+        // Notice status changes to "pending" even if it was previously "resolved"
         await updateDoc(requestDocRef, {
           messages: arrayUnion(newMsg),
           status: "pending",
@@ -88,8 +123,29 @@ function Footer() {
       }
 
       setChatMessage("");
+
+      // Trigger AI reply simulation delay safely
+      setTimeout(async () => {
+        const aiAnswer = await generateAIReply(cleanMessage, updatedMessages);
+        if (aiAnswer) {
+          const aiReply = {
+            senderId: "ai-assistant",
+            senderName: "Admin AI Support",
+            message: aiAnswer,
+            timestamp: new Date().toISOString(),
+            isAdmin: true
+          };
+
+          await updateDoc(requestDocRef, {
+            messages: arrayUnion(aiReply),
+            status: "replied",
+            lastUpdatedAt: new Date().toISOString()
+          });
+        }
+      }, 1000);
+
     } catch (error) {
-      console.error("Error committing support communication request:", error);
+      console.error("Error handling direct user chat submission:", error);
     } finally {
       setSending(false);
     }
@@ -117,10 +173,10 @@ function Footer() {
             <div className="col-md-2">
               <h6 className="fw-semibold text-dark">Platform</h6>
               <ul className="list-unstyled mt-3">
-                <li><a href="/Learningpaths" className="text-muted text-decoration-none">Learning Paths</a></li>
-                <li><a href="/Classes" className="text-muted text-decoration-none">Classes</a></li>
-                <li><a href="/Progress" className="text-muted text-decoration-none">Progress</a></li>
-                <li><a href="/Achievements" className="text-muted text-decoration-none">Achievements</a></li>
+                <li><a href="/learningpaths" className="text-muted text-decoration-none">Learning Paths</a></li>
+                <li><a href="/classes" className="text-muted text-decoration-none">Classes</a></li>
+                <li><a href="/progress" className="text-muted text-decoration-none">Progress</a></li>
+                <li><a href="/achievements" className="text-muted text-decoration-none">Achievements</a></li>
               </ul>
             </div>
 
@@ -141,8 +197,9 @@ function Footer() {
               <ul className="list-unstyled mt-3">
                 <li>
                   <button 
+                    type="button"
                     onClick={() => setShowHelp(true)} 
-                    className="btn btn-link p-0 text-muted text-decoration-none"
+                    className="btn btn-link p-0 text-muted text-decoration-none border-0 bg-transparent align-baseline"
                   >
                     Help Center
                   </button>
@@ -165,7 +222,7 @@ function Footer() {
         </div>
       </footer>
 
-      {/* SUPPORT HELP CENTER MODAL DIALOG POPUP */}
+      {/* SUPPORT MODAL */}
       <AnimatePresence>
         {showHelp && (
           <motion.div 
@@ -178,7 +235,7 @@ function Footer() {
             <div className="modal-dialog modal-dialog-centered">
               <motion.div 
                 className="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-white"
-                style={{ height: "500px", display: "flex", flexDirection: "column" }}
+                style={{ height: "550px", display: "flex", flexDirection: "column" }}
                 initial={{ scale: 0.95, y: 20 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.95, y: 20 }}
@@ -186,25 +243,25 @@ function Footer() {
                 {/* Header */}
                 <div className="p-3 bg-primary text-white d-flex justify-content-between align-items-center shadow-sm">
                   <div className="d-flex align-items-center gap-2">
-                    <span className="fs-5">💬</span>
-                    <h6 className="fw-bold mb-0">SkillPath Support Desk</h6>
+                    <span className="fs-5">🤖</span>
+                    <h6 className="fw-bold mb-0">SkillPath Smart Support Desk</h6>
                   </div>
                   <button type="button" className="btn-close btn-close-white border-0" onClick={() => setShowHelp(false)}></button>
                 </div>
 
-                {/* Main Message Space */}
+                {/* Main Message Body */}
                 <div className="p-3 flex-grow-1 bg-light d-flex flex-column gap-2" style={{ overflowY: "auto" }}>
                   {!user ? (
                     <div className="text-center my-auto p-4">
                       <span className="fs-2">🔒</span>
                       <h6 className="fw-bold mt-2">Authentication Required</h6>
-                      <p className="text-muted small mb-0">Please sign in to your SkillPath account to start a direct message thread with system administrators.</p>
+                      <p className="text-muted small mb-0">Please sign in to your SkillPath account to start a direct message thread with support.</p>
                     </div>
                   ) : !activeRequest || !activeRequest.messages || activeRequest.messages.length === 0 ? (
                     <div className="text-center my-auto p-4 text-muted">
-                      <span className="fs-3">👋</span>
-                      <h6 className="fw-bold mt-2">Hello, {user.fullname}!</h6>
-                      <p className="small mb-0">Need any assistance? Type a message below to instantly dispatch a help request directly to our administrators.</p>
+                      <span className="fs-3">🤖</span>
+                      <h6 className="fw-bold mt-2">AI Assistant Online</h6>
+                      <p className="small mb-0">Hello {user.fullname}! Ask a question below to receive instant support instructions from our system agent.</p>
                     </div>
                   ) : (
                     activeRequest.messages.map((msg, idx) => {
@@ -228,7 +285,7 @@ function Footer() {
                   )}
                 </div>
 
-                {/* Footer Chat Form Input */}
+                {/* Chat Input remains enabled unconditionally */}
                 {user && (
                   <div className="p-2.5 bg-white border-top">
                     <form onSubmit={handleSendMessage} className="d-flex gap-2">
@@ -236,7 +293,7 @@ function Footer() {
                         type="text" 
                         required
                         className="form-control form-control-sm rounded-pill px-3 border" 
-                        placeholder="Type standard communication message body..."
+                        placeholder="Type your message here..."
                         value={chatMessage}
                         onChange={(e) => setChatMessage(e.target.value)}
                         disabled={sending}
