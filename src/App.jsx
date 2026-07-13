@@ -17,6 +17,7 @@ import Admin from './Admin'
 import ViewLesson from './classes/Viewlesson'
 import TakeQuiz from './classes/Takequiz'
 import Profile from './pages/Profile'
+import Requests from './pages/Requests'
 
 function App() {
   const [count, setCount] = useState(0)
@@ -47,6 +48,7 @@ function App() {
             <Route path="/viewlesson" element={<ViewLesson />} />
             <Route path="/takequiz" element={<TakeQuiz />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/requests" element={<Requests />} />
           </Routes>
         </main>
 
