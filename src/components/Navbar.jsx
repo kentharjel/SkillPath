@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
-import { doc, getDoc, collection, onSnapshot } from "firebase/firestore"; // Added collection and onSnapshot
+import { doc, getDoc, collection, onSnapshot } from "firebase/firestore";
 import { useNavigate, Link, NavLink, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -10,7 +10,7 @@ function Navbar() {
   const location = useLocation();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [requestCount, setRequestCount] = useState(0); // Added for admin request counter badge
+  const [requestCount, setRequestCount] = useState(0);
   const collapseRef = useRef(null);
 
   const [modal, setModal] = useState({
@@ -34,7 +34,7 @@ function Navbar() {
   }, [location]);
 
   useEffect(() => {
-    let unsubscribeRequests = () => {}; // Holder to clean up real-time listener
+    let unsubscribeRequests = () => {};
 
     const unsubscribeAuth = auth.onAuthStateChanged(async (currentUser) => {
       if (currentUser) {
@@ -52,15 +52,16 @@ function Navbar() {
 
           // Real-time counter synchronization if authenticated as an administrator
           if (userData.role === "admin") {
+            // FIX: Pointing to "tickets" collection instead of "requests"
             unsubscribeRequests = onSnapshot(
-              collection(db, "requests"),
+              collection(db, "tickets"),
               (snapshot) => {
-                // Filters out resolved tickets so the badge count accurately displays only active items
+                // Filters out resolved tickets so the badge count accurately displays active items
                 const activeTickets = snapshot.docs.filter(doc => doc.data().status !== "resolved");
                 setRequestCount(activeTickets.length);
               },
               (error) => {
-                console.error("Error listening to database request streams:", error);
+                console.error("Error listening to database ticket streams:", error);
               }
             );
           }
@@ -70,7 +71,7 @@ function Navbar() {
       } else {
         setUser(null);
         setRequestCount(0);
-        unsubscribeRequests(); // Detach tracking stream on logout
+        unsubscribeRequests();
       }
       setLoading(false);
     });
@@ -133,7 +134,7 @@ function Navbar() {
     ];
     if (user.role === "admin") return [
       { label: "Admin Dashboard", to: "/admin" },
-      { label: "Requests", to: "/requests", badge: requestCount }, // Admin requests item with numeric badge counter
+      { label: "Requests", to: "/requests", badge: requestCount },
       { label: "Learning Paths", to: "/learningpaths" },
       { label: "Profile", to: "/profile" },
     ];
@@ -192,7 +193,7 @@ function Navbar() {
                       <motion.div whileHover={{ scale: 1.02 }} className="d-flex align-items-center gap-2" style={{ position: 'relative' }}>
                         <span>{item.label}</span>
                         
-                        {/* Dynamic Count Badge Indicator rendering if parameter holds an active evaluation */}
+                        {/* Dynamic Count Badge */}
                         {item.badge !== undefined && item.badge > 0 && (
                           <span className="badge rounded-pill bg-danger" style={{ fontSize: "0.72rem", padding: "0.35em 0.6em" }}>
                             {item.badge}

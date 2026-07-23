@@ -4,46 +4,68 @@ import { collection, onSnapshot, doc, updateDoc, arrayUnion, query, orderBy } fr
 import { motion, AnimatePresence } from "framer-motion";
 
 function Requests() {
-  const [requests, setRequests] = useState([]);
+  const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [activeTab, setActiveTab] = useState("active"); // "active" | "history"
+  const [selectedTicket, setSelectedTicket] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
 
-  // 1. Listen to all incoming user requests in real-time
+  // Resolution Evaluation Modal States
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [rating, setRating] = useState(5);
+  const [evaluationNote, setEvaluationNote] = useState("");
+
+  // Helper: Format elapsed time relative to current date
+  const getTimeElapsed = (timestamp) => {
+    if (!timestamp) return "Just now";
+    const created = new Date(timestamp);
+    const now = new Date();
+    const diffMs = Math.abs(now - created);
+    
+    const minutes = Math.floor(diffMs / (1000 * 60));
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (days > 0) return `${days}d ago`;
+    if (hours > 0) return `${hours}h ago`;
+    if (minutes > 0) return `${minutes}m ago`;
+    return "Just now";
+  };
+
+  // 1. Listen to all tickets in real-time
   useEffect(() => {
-    const q = query(collection(db, "requests"), orderBy("createdAt", "desc"));
+    const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const docsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      setRequests(docsData);
+      setTickets(docsData);
       
-      // Keep selected request updated in real-time if messages change while chat modal is open
-      if (selectedRequest) {
-        const updated = docsData.find(r => r.id === selectedRequest.id);
-        if (updated) setSelectedRequest(updated);
+      if (selectedTicket) {
+        const updated = docsData.find(t => t.id === selectedTicket.id);
+        if (updated) setSelectedTicket(updated);
       }
       
       setLoading(false);
     }, (error) => {
-      console.error("Error fetching requests:", error);
+      console.error("Error fetching tickets:", error);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [selectedRequest?.id]);
+  }, [selectedTicket?.id]);
 
-  // 2. Handle pushing an admin reply message into the request chat thread array
+  // 2. Transmit Admin Reply
   const handleSendReply = async (e) => {
     e.preventDefault();
-    if (!replyText.trim() || !selectedRequest || sending || selectedRequest.status === "resolved") return;
+    if (!replyText.trim() || !selectedTicket || sending || selectedTicket.status === "resolved") return;
 
     setSending(true);
     try {
-      const requestDocRef = doc(db, "requests", selectedRequest.id);
+      const ticketDocRef = doc(db, "tickets", selectedTicket.id);
       
       const newReply = {
         senderId: auth.currentUser?.uid || "admin",
@@ -53,7 +75,7 @@ function Requests() {
         isAdmin: true
       };
 
-      await updateDoc(requestDocRef, {
+      await updateDoc(ticketDocRef, {
         messages: arrayUnion(newReply),
         status: "replied", 
         lastUpdatedAt: new Date().toISOString()
@@ -67,25 +89,40 @@ function Requests() {
     }
   };
 
-  // 3. Close ticket functionality via the 3-dots menu action
-  const handleCloseTicket = async () => {
-    if (!selectedRequest) return;
+  // 3. Finalize Closing Ticket with Evaluation
+  const handleConfirmCloseTicket = async (e) => {
+    e.preventDefault();
+    if (!selectedTicket) return;
+
     try {
-      const requestDocRef = doc(db, "requests", selectedRequest.id);
-      await updateDoc(requestDocRef, {
+      const ticketDocRef = doc(db, "tickets", selectedTicket.id);
+      await updateDoc(ticketDocRef, {
         status: "resolved",
+        evaluation: {
+          rating: rating,
+          note: evaluationNote.trim() || "Resolved by admin.",
+          closedAt: new Date().toISOString()
+        },
         lastUpdatedAt: new Date().toISOString()
       });
+
+      setShowCloseModal(false);
+      setEvaluationNote("");
+      setRating(5);
     } catch (error) {
-      console.error("Error closing ticket:", error);
+      console.error("Error closing ticket with evaluation:", error);
     }
   };
+
+  const activeTickets = tickets.filter(t => t.status !== "resolved");
+  const resolvedTickets = tickets.filter(t => t.status === "resolved");
+  const displayedTickets = activeTab === "active" ? activeTickets : resolvedTickets;
 
   if (loading) {
     return (
       <div className="container py-5 text-center" style={{ marginTop: "80px" }}>
         <div className="spinner-border text-primary" role="status"></div>
-        <p className="text-muted mt-3">Loading incoming requests panel...</p>
+        <p className="text-muted mt-3">Loading tickets desk...</p>
       </div>
     );
   }
@@ -96,60 +133,88 @@ function Requests() {
         <div className="row justify-content-center">
           <div className="col-lg-10">
             
-            <div className="d-flex align-items-center justify-content-between mb-4">
+            {/* Header & Tabs */}
+            <div className="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
               <div>
-                <h3 className="fw-bold text-dark mb-1">User Service Requests</h3>
-                <p className="text-muted small mb-0">Review text communications and dispatch real-time admin replies.</p>
+                <h3 className="fw-bold text-dark mb-1">Support Tickets Desk</h3>
+                <p className="text-muted small mb-0">Review requests, reply to users, and manage history.</p>
               </div>
-              <span className="badge bg-primary px-3 py-2 rounded-pill fw-bold">
-                {requests.filter(r => r.status !== "resolved").length} Active / {requests.length} Total
-              </span>
+
+              {/* Navigation Tabs */}
+              <div className="btn-group bg-white p-1 rounded-pill shadow-sm">
+                <button 
+                  className={`btn btn-sm rounded-pill fw-semibold px-3 ${activeTab === "active" ? "btn-primary" : "btn-light text-muted"}`}
+                  onClick={() => setActiveTab("active")}
+                >
+                  Active ({activeTickets.length})
+                </button>
+                <button 
+                  className={`btn btn-sm rounded-pill fw-semibold px-3 ${activeTab === "history" ? "btn-primary" : "btn-light text-muted"}`}
+                  onClick={() => setActiveTab("history")}
+                >
+                  Resolved History ({resolvedTickets.length})
+                </button>
+              </div>
             </div>
 
-            {/* REQUEST LIST TILES */}
-            {requests.length === 0 ? (
+            {/* TICKET TILES LIST */}
+            {displayedTickets.length === 0 ? (
               <div className="card border-0 shadow-sm rounded-4 p-5 text-center bg-white">
-                <span className="fs-1">🎉</span>
-                <h5 className="fw-bold mt-3">All Clear!</h5>
-                <p className="text-muted mb-0 small">No active help or configuration requests requested by users at this time.</p>
+                <span className="fs-1">📂</span>
+                <h5 className="fw-bold mt-3">No Tickets Found</h5>
+                <p className="text-muted mb-0 small">
+                  {activeTab === "active" ? "There are currently no open support tickets." : "No resolved tickets stored in history yet."}
+                </p>
               </div>
             ) : (
               <div className="row g-3">
-                {requests.map((req) => (
-                  <div className="col-100" key={req.id}>
+                {displayedTickets.map((ticket) => (
+                  <div className="col-12" key={ticket.id}>
                     <motion.div 
                       className="card border-0 shadow-sm rounded-4 bg-white p-4 hover-shadow"
                       style={{ cursor: "pointer" }}
-                      whileHover={{ scale: 1.01 }}
-                      onClick={() => setSelectedRequest(req)}
+                      whileHover={{ scale: 1.005 }}
+                      onClick={() => setSelectedTicket(ticket)}
                     >
                       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
                         <div className="d-flex align-items-center gap-3">
-                          <div className="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center fw-bold fw-semibold" style={{ width: "48px", height: "48px" }}>
-                            {req.userName ? req.userName.charAt(0).toUpperCase() : "U"}
+                          <div className="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center fw-bold" style={{ width: "48px", height: "48px" }}>
+                            {ticket.userName ? ticket.userName.charAt(0).toUpperCase() : "U"}
                           </div>
                           <div>
-                            <h6 className="fw-bold mb-0 text-dark">{req.userName || "Unknown User"}</h6>
-                            <p className="text-muted small mb-0">{req.userEmail || "No Email Provided"}</p>
+                            <div className="d-flex align-items-center gap-2">
+                              <h6 className="fw-bold mb-0 text-dark">{ticket.subject || "No Subject"}</h6>
+                              <span className="badge bg-light text-muted border small" style={{ fontSize: "0.65rem" }}>
+                                ⏱️ {getTimeElapsed(ticket.createdAt)}
+                              </span>
+                            </div>
+                            <p className="text-muted small mb-0">{ticket.userName} ({ticket.userEmail})</p>
                           </div>
                         </div>
 
                         <div className="text-end d-flex align-items-center gap-3">
-                          <span className={`badge rounded-pill px-3 py-1.5 small fw-bold text-capitalize ${
-                            req.status === "resolved" ? "bg-secondary text-white" :
-                            req.status === "replied" ? "bg-light text-success border border-success" : "bg-danger text-white animate-pulse"
+                          <span className={`badge rounded-pill px-3 py-1.5 small fw-bold ${
+                            ticket.status === "resolved" ? "bg-secondary text-white" :
+                            ticket.status === "replied" ? "bg-light text-success border border-success" : "bg-danger text-white animate-pulse"
                           }`}>
-                            {req.status === "resolved" ? "Resolved" : req.status || "Pending Admin Action"}
+                            {ticket.status === "resolved" ? "Resolved" : ticket.status || "Pending"}
                           </span>
-                          <span className="text-muted fs-5">💬</span>
                         </div>
                       </div>
                       
                       <div className="mt-3 bg-light p-2.5 rounded-3 border-start border-primary border-3">
                         <p className="text-secondary small mb-0 text-truncate">
-                          <strong>Latest Message:</strong> {req.messages && req.messages.length > 0 ? req.messages[req.messages.length - 1].message : "No message logs."}
+                          <strong>Latest Message:</strong> {ticket.messages && ticket.messages.length > 0 ? ticket.messages[ticket.messages.length - 1].message : "No message logs."}
                         </p>
                       </div>
+
+                      {/* Resolved Evaluation Banner */}
+                      {ticket.status === "resolved" && ticket.evaluation && (
+                        <div className="mt-2 pt-2 border-top d-flex align-items-center justify-content-between text-muted small">
+                          <span><strong>Evaluation:</strong> {ticket.evaluation.note}</span>
+                          <span className="text-warning fw-bold">{"★".repeat(ticket.evaluation.rating)}</span>
+                        </div>
+                      )}
                     </motion.div>
                   </div>
                 ))}
@@ -160,9 +225,9 @@ function Requests() {
         </div>
       </div>
 
-      {/* CHAT-LIKE FULL SCREEN MODAL DIALOG POPUP */}
+      {/* CHAT MODAL */}
       <AnimatePresence>
-        {selectedRequest && (
+        {selectedTicket && (
           <motion.div 
             className="modal d-block" 
             style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 2050 }}
@@ -173,59 +238,47 @@ function Requests() {
             <div className="modal-dialog modal-dialog-centered modal-lg">
               <motion.div 
                 className="modal-content border-0 shadow-xl rounded-4 overflow-hidden bg-white"
-                style={{ height: "600px", display: "flex", flexDirection: "column" }}
+                style={{ height: "620px", display: "flex", flexDirection: "column" }}
                 initial={{ scale: 0.95, y: 20 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.95, y: 20 }}
               >
                 
-                {/* CHAT HEADER LAYOUT */}
+                {/* HEADER */}
                 <div className="p-4 bg-primary text-white d-flex justify-content-between align-items-center shadow-sm">
                   <div className="d-flex align-items-center gap-3">
                     <div className="bg-white text-primary rounded-circle d-flex align-items-center justify-content-center fw-bold fs-5" style={{ width: "42px", height: "42px" }}>
-                      {selectedRequest.userName ? selectedRequest.userName.charAt(0).toUpperCase() : "U"}
+                      {selectedTicket.userName ? selectedTicket.userName.charAt(0).toUpperCase() : "U"}
                     </div>
                     <div>
-                      <h5 className="fw-bold mb-0">{selectedRequest.userName}</h5>
-                      <span className="small text-white-50">{selectedRequest.userEmail}</span>
+                      <h5 className="fw-bold mb-0">{selectedTicket.subject}</h5>
+                      <span className="small text-white-50">{selectedTicket.userName} • Open for: {getTimeElapsed(selectedTicket.createdAt)}</span>
                     </div>
                   </div>
                   
                   <div className="d-flex align-items-center gap-2">
-                    {/* 3 DOTS ACTIONS ACTION MENU */}
-                    {selectedRequest.status !== "resolved" && (
-                      <div className="dropdown">
-                        <button 
-                          className="btn btn-link text-white p-0 border-0 fs-4 lh-1 text-decoration-none me-2" 
-                          type="button" 
-                          data-bs-toggle="dropdown"
-                          aria-expanded="false"
-                        >
-                          ⋮
-                        </button>
-                        <ul className="dropdown-menu dropdown-menu-end shadow border-0 rounded-3 mt-2">
-                          <li>
-                            <button className="dropdown-item text-danger small fw-semibold py-2" onClick={handleCloseTicket}>
-                              🔒 Close Ticket
-                            </button>
-                          </li>
-                        </ul>
-                      </div>
+                    {selectedTicket.status !== "resolved" && (
+                      <button 
+                        className="btn btn-sm btn-light text-danger fw-bold rounded-pill px-3 me-2"
+                        onClick={() => setShowCloseModal(true)}
+                      >
+                        Close Ticket
+                      </button>
                     )}
-                    <button type="button" className="btn-close btn-close-white border-0" onClick={() => setSelectedRequest(null)} aria-label="Close"></button>
+                    <button type="button" className="btn-close btn-close-white border-0" onClick={() => setSelectedTicket(null)} aria-label="Close"></button>
                   </div>
                 </div>
 
-                {/* RESOLVED TICKET NOTIFICATION BANNER */}
-                {selectedRequest.status === "resolved" && (
+                {/* RESOLVED BANNER */}
+                {selectedTicket.status === "resolved" && (
                   <div className="bg-secondary text-white text-center py-2 small fw-bold">
-                    🔒 This service request has been closed and marked as resolved.
+                    This ticket has been marked as resolved.
                   </div>
                 )}
 
-                {/* CHAT BUBBLE CONVERSATION CONTAINER BOX */}
+                {/* CHAT MESSAGES */}
                 <div className="p-4 flex-grow-1 bg-light overflow-auto d-flex flex-column gap-3" style={{ overflowY: "auto" }}>
-                  {selectedRequest.messages?.map((msg, index) => {
+                  {selectedTicket.messages?.map((msg, index) => {
                     const isAdminSender = msg.isAdmin || msg.senderId === auth.currentUser?.uid;
                     return (
                       <div 
@@ -246,30 +299,30 @@ function Requests() {
                           </div>
                         </div>
                         <span className="text-muted px-1 mt-0.5" style={{ fontSize: '0.65rem' }}>
-                          {isAdminSender ? "You" : selectedRequest.userName}
+                          {isAdminSender ? "You" : selectedTicket.userName}
                         </span>
                       </div>
                     );
                   })}
                 </div>
 
-                {/* CHAT INPUT FIELD FORM FOOTER */}
+                {/* REPLY INPUT */}
                 <div className="p-3 bg-white border-top">
                   <form onSubmit={handleSendReply} className="d-flex gap-2">
                     <input 
                       type="text" 
                       className="form-control rounded-pill px-4 border" 
-                      placeholder={selectedRequest.status === "resolved" ? "Ticket is resolved..." : `Reply to ${selectedRequest.userName}...`}
+                      placeholder={selectedTicket.status === "resolved" ? "Ticket is resolved..." : `Reply to ${selectedTicket.userName}...`}
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
-                      disabled={sending || selectedRequest.status === "resolved"}
+                      disabled={sending || selectedTicket.status === "resolved"}
                     />
                     <button 
                       type="submit" 
-                      disabled={!replyText.trim() || sending || selectedRequest.status === "resolved"} 
-                      className="btn btn-primary px-4 rounded-pill fw-bold d-flex align-items-center gap-2 shadow-sm"
+                      disabled={!replyText.trim() || sending || selectedTicket.status === "resolved"} 
+                      className="btn btn-primary px-4 rounded-pill fw-bold shadow-sm"
                     >
-                      {sending ? "Sending..." : "Send 🚀"}
+                      {sending ? "Sending..." : "Send"}
                     </button>
                   </form>
                 </div>
@@ -279,6 +332,68 @@ function Requests() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* TICKET EVALUATION / RESOLUTION MODAL */}
+      <AnimatePresence>
+        {showCloseModal && (
+          <motion.div 
+            className="modal d-block" 
+            style={{ backgroundColor: "rgba(0,0,0,0.6)", zIndex: 2060 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="modal-dialog modal-dialog-centered modal-sm">
+              <div className="modal-content border-0 shadow-lg rounded-4 p-3 bg-white">
+                <div className="modal-header border-0 pb-0">
+                  <h6 className="fw-bold mb-0">Close Ticket Evaluation</h6>
+                  <button type="button" className="btn-close" onClick={() => setShowCloseModal(false)}></button>
+                </div>
+                <form onSubmit={handleConfirmCloseTicket} className="modal-body">
+                  <p className="text-muted small mb-3">Provide a resolution evaluation summary before closing this ticket.</p>
+                  
+                  <div className="mb-3">
+                    <label className="form-label small fw-semibold text-muted">Resolution Rating</label>
+                    <select 
+                      className="form-select form-select-sm" 
+                      value={rating} 
+                      onChange={(e) => setRating(Number(e.target.value))}
+                    >
+                      <option value={5}>⭐⭐⭐⭐⭐ (5 - Resolved Completely)</option>
+                      <option value={4}>⭐⭐⭐⭐ (4 - Resolved with minor notes)</option>
+                      <option value={3}>⭐⭐⭐ (3 - Moderate Resolution)</option>
+                      <option value={2}>⭐⭐ (2 - Partially Resolved)</option>
+                      <option value={1}>⭐ (1 - Unresolved / Escalated)</option>
+                    </select>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="form-label small fw-semibold text-muted">Evaluation Note</label>
+                    <textarea 
+                      required
+                      className="form-control form-control-sm"
+                      rows="3"
+                      placeholder="e.g. Issue fixed after resetting student account credentials..."
+                      value={evaluationNote}
+                      onChange={(e) => setEvaluationNote(e.target.value)}
+                    ></textarea>
+                  </div>
+
+                  <div className="d-flex gap-2 justify-content-end">
+                    <button type="button" className="btn btn-light btn-sm rounded-pill" onClick={() => setShowCloseModal(false)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn btn-danger btn-sm rounded-pill fw-bold">
+                      Confirm & Close
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

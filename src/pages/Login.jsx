@@ -4,10 +4,11 @@ import {
   signInWithEmailAndPassword, 
   signInWithPopup, 
   GoogleAuthProvider, 
-  sendPasswordResetEmail 
+  sendPasswordResetEmail,
+  signOut
 } from "firebase/auth";
 import { auth, db } from "../firebase";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 
 // React Icons for eye toggle
 import { AiOutlineEye, AiOutlineEyeInvisible } from "react-icons/ai";
@@ -63,23 +64,26 @@ function Login() {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       const userSnap = await getDoc(doc(db, "users", user.uid));
-      let userRole = "student";
 
+      // IF USER DOES NOT EXIST IN FIRESTORE, DO NOT CREATE AN ACCOUNT
       if (!userSnap.exists()) {
-        await setDoc(doc(db, "users", user.uid), {
-          fullname: user.displayName || "Google User",
-          email: user.email,
-          role: "student",
-          createdAt: serverTimestamp(),
+        await signOut(auth); // Immediately terminate session
+        setModal({
+          show: true,
+          title: "Account Not Found",
+          message: "No registered SkillPath account exists for this Google email. Please register or sign up first.",
+          type: "error",
+          onClose: null
         });
-      } else {
-        userRole = userSnap.data().role;
+        return;
       }
+
+      const userRole = userSnap.data().role || "student";
 
       setModal({
         show: true,
-        title: "Welcome!",
-        message: `Successfully signed in as ${user.displayName}.`,
+        title: "Welcome Back!",
+        message: `Successfully logged in as ${user.displayName || "User"}.`,
         type: "success",
         onClose: () => handleRoleRouting(userRole)
       });
@@ -149,12 +153,10 @@ function Login() {
     setResetLoading(true);
 
     try {
-      // This sends the actual email via Firebase servers
       await sendPasswordResetEmail(auth, resetEmail.trim());
       
-      setShowForgotModal(false); // Close the input modal
+      setShowForgotModal(false);
       
-      // Show the Success Status Modal
       setModal({
         show: true,
         title: "Email Sent Successfully!",
@@ -242,7 +244,7 @@ function Login() {
               type="button"
               className="btn btn-link p-0 small text-primary text-decoration-none fw-bold"
               onClick={() => {
-                setResetEmail(email); // Autofill reset email if they typed it already
+                setResetEmail(email);
                 setShowForgotModal(true);
               }}
             >
@@ -302,7 +304,7 @@ function Login() {
         </div>
       )}
 
-      {/* GLOBAL STATUS MODAL (Used for success/error messages) */}
+      {/* GLOBAL STATUS MODAL */}
       {modal.show && (
         <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1070 }}>
           <div className="modal-dialog modal-dialog-centered">
